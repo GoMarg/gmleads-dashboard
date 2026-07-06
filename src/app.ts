@@ -3,7 +3,11 @@ import { registerErrorHandler } from '@gmleads/shared';
 import { registerRoutes } from './routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: {
+      redact: ['req.headers.authorization', 'req.body.slackWebhookUrl'],
+    },
+  });
   registerErrorHandler(app);
 
   app.get('/health', async () => {
