@@ -1,29 +1,19 @@
-import Fastify from 'fastify';
-import { registerErrorHandler } from '@gmleads/shared';
-import { registerRoutes } from './routes.js';
-
-const app = Fastify({ logger: true });
-registerErrorHandler(app);
-
-app.get('/health', async () => {
-  return { status: 'ok', service: 'dashboard' };
-});
+import { buildApp } from './app.js';
 
 const port = Number(process.env.PORT ?? 3006);
 
-process.on('unhandledRejection', (err) => {
-  app.log.error({ err }, 'unhandled rejection — service continues running');
-});
-
 async function start(): Promise<void> {
-  await registerRoutes(app);
+  const app = await buildApp();
+
+  process.on('unhandledRejection', (err) => {
+    app.log.error({ err }, 'unhandled rejection — service continues running');
+  });
+
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`dashboard listening on ${port}`);
 }
 
 start().catch((err) => {
-  app.log.error(err);
+  console.error(err);
   process.exit(1);
 });
-
-export default app;
