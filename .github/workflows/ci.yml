@@ -21,8 +21,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: GoMarg/gmleads-shared
+          path: ../gmleads-shared
+          ref: develop
+          token: ${{ secrets.SHARED_REPO_PAT }}
       - uses: actions/setup-node@v4
         with: { node-version: "20", cache: "npm" }
+      - name: Build @gmleads/shared
+        working-directory: ../gmleads-shared
+        run: |
+          npm ci --ignore-scripts
+          npm run build
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
