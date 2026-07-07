@@ -24,9 +24,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: GoMarg/gmleads-shared
-          path: ../gmleads-shared
+          path: gmleads-shared-src
           ref: develop
           token: ${{ secrets.SHARED_REPO_PAT }}
+      # actions/checkout refuses any path outside $GITHUB_WORKSPACE, so it's
+      # checked out into a subdirectory here and copied to the actual
+      # sibling location file:../gmleads-shared expects.
+      - run: cp -r gmleads-shared-src ../gmleads-shared
       - uses: actions/setup-node@v4
         with: { node-version: "20", cache: "npm" }
       - name: Build @gmleads/shared
