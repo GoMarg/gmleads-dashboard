@@ -12,10 +12,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
     }
-    const { name, slackWebhookUrl, icpDefinition } = parsed.data;
+    const { name, slackWebhookUrl, slackChannelUrl, icpDefinition } = parsed.data;
     const workspace = await workspaceRepo.create({
       name,
       slackWebhookUrl: slackWebhookUrl ?? null,
+      slackChannelUrl: slackChannelUrl ?? null,
       icpDefinition: icpDefinition ?? {},
     });
     return reply.code(201).send(workspace);

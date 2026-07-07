@@ -6,6 +6,7 @@ interface WorkspaceRow {
   name: string;
   embed_key: string;
   slack_webhook_url: string | null;
+  slack_channel_url: string | null;
   icp_definition: IcpDefinition;
   feature_flags: Partial<FeatureFlags>;
   alert_claim_timeout_mins: number;
@@ -18,6 +19,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     name: row.name,
     embedKey: row.embed_key,
     slackWebhookUrl: row.slack_webhook_url,
+    slackChannelUrl: row.slack_channel_url,
     icpDefinition: row.icp_definition,
     featureFlags: row.feature_flags,
     alertClaimTimeoutMins: row.alert_claim_timeout_mins,
@@ -35,6 +37,7 @@ export class WorkspaceRepo {
   async create(input: {
     name: string;
     slackWebhookUrl: string | null;
+    slackChannelUrl: string | null;
     icpDefinition: Partial<IcpDefinition>;
   }): Promise<Workspace> {
     const embedKey = generateEmbedKey();
@@ -46,10 +49,16 @@ export class WorkspaceRepo {
     };
 
     const res = await this.db.query<WorkspaceRow>(
-      `INSERT INTO workspaces (name, embed_key, slack_webhook_url, icp_definition)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO workspaces (name, embed_key, slack_webhook_url, slack_channel_url, icp_definition)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [input.name, embedKey, input.slackWebhookUrl, JSON.stringify(icpDefinition)]
+      [
+        input.name,
+        embedKey,
+        input.slackWebhookUrl,
+        input.slackChannelUrl,
+        JSON.stringify(icpDefinition),
+      ]
     );
     return toWorkspace(res.rows[0]);
   }
