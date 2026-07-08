@@ -79,6 +79,36 @@ describe('POST /internal/workspaces', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('persists and returns slackChannelUrl when provided (KAN-97)', async () => {
+    const channelUrl = 'https://join.slack.com/t/acme/shared_invite/abc123';
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme', slackChannelUrl: channelUrl },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().slackChannelUrl).toBe(channelUrl);
+  });
+
+  it('leaves slackChannelUrl null when omitted (backward-compat)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().slackChannelUrl).toBeNull();
+  });
+
+  it('rejects a non-https slackChannelUrl', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme', slackChannelUrl: 'javascript:alert(1)' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe('GET /internal/workspaces/:id/leads', () => {
