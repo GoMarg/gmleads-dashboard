@@ -31,6 +31,19 @@ jobs:
       # checked out into a subdirectory here and copied to the actual
       # sibling location file:../gmleads-shared expects.
       - run: cp -r gmleads-shared-src ../gmleads-shared
+      - uses: actions/checkout@v4
+        with:
+          repository: GoMarg/gmleads-infra
+          path: gmleads-infra-src
+          ref: develop
+          token: ${{ secrets.SHARED_REPO_PAT }}
+      # Canonical migration entry point (gmleads-infra/scripts/migrate.sh) —
+      # its psql+$DATABASE_URL path activates automatically here, so this
+      # doesn't duplicate any SQL-invocation logic.
+      - name: Apply migrations
+        run: bash gmleads-infra-src/scripts/migrate.sh
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gmleads_test
       - uses: actions/setup-node@v4
         with: { node-version: "20", cache: "npm" }
       - name: Build @gmleads/shared
