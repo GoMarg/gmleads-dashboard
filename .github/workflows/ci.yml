@@ -4,6 +4,7 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -59,3 +60,54 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gmleads_test
           REDIS_URL: redis://localhost:6379
           NODE_ENV: test
+
+  # Publishes a container image to GHCR after quality passes, on push to
+  # develop/main or manual dispatch (dispatch exists so this can be verified
+  # on a feature branch before merging — see ENGINEERING_STANDARDS.md's
+  # verify-before-merge rule). This is the artifact KAN-31's Railway deploy
+  # is meant to consume: staging pulls a specific sha tag, and promoting to
+  # prod means re-deploying that same sha tag, not rebuilding.
+  publish:
+    needs: quality
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')) || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ${{ github.event.repository.name }}
+      - uses: actions/checkout@v4
+        with:
+          repository: GoMarg/gmleads-shared
+          path: gmleads-shared
+          ref: develop
+          token: ${{ secrets.SHARED_REPO_PAT }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image tags
+        id: meta
+        run: |
+          set -e
+          IMAGE="ghcr.io/gomarg/${{ github.event.repository.name }}"
+          SHA_TAG="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
+          TAGS=("$IMAGE:$SHA_TAG")
+          REF="${{ github.ref_name }}"
+          if [ "$REF" = "develop" ] || [ "$REF" = "main" ]; then
+            TAGS+=("$IMAGE:$REF")
+          fi
+          if [ "$REF" = "main" ]; then
+            TAGS+=("$IMAGE:latest")
+          fi
+          { echo "tags<<EOF"; printf '%s\n' "${TAGS[@]}"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ github.event.repository.name }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
