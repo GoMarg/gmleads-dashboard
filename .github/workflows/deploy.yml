@@ -1,0 +1,66 @@
+name: Deploy
+
+# KAN-31 scaffolding. Intentionally workflow_dispatch-only and NOT wired to
+# any push trigger — it must stay inert until a real Railway project exists.
+# See gmleads-agents/context/adr/ for the full staging/prod deployment
+# design (image-based deploy from GHCR, not a git-triggered rebuild, because
+# this repo's Dockerfile depends on a sibling gmleads-shared checkout that a
+# Railway-native git build wouldn't have access to).
+#
+# The serviceInstanceUpdate call below is UNVERIFIED — there is no live
+# Railway project to test it against yet. It reflects Railway's publicly
+# documented GraphQL API as of this writing, not a confirmed-working
+# integration. Validate (and fix if needed) the first time real
+# RAILWAY_TOKEN/service-ID secrets exist, before relying on it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target Railway environment"
+        required: true
+        type: choice
+        options: [staging, production]
+      image_tag:
+        description: "GHCR tag to deploy (e.g. sha-abc1234, develop, main). Must already exist in ghcr.io/gomarg/<this repo> — this workflow never builds an image, only repoints Railway at one that the publish job already pushed."
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Guard — refuse to run without real Railway credentials
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
+            echo "::error::RAILWAY_TOKEN is not set. No Railway project has been provisioned for this repo yet (KAN-31 is blocked on that). Nothing to deploy."
+            exit 1
+          fi
+
+      - name: Resolve target service ID
+        id: service
+        run: |
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            SERVICE_ID="${{ secrets.RAILWAY_PROD_SERVICE_ID }}"
+          else
+            SERVICE_ID="${{ secrets.RAILWAY_STAGING_SERVICE_ID }}"
+          fi
+          if [ -z "$SERVICE_ID" ]; then
+            echo "::error::No Railway service ID secret set for environment '${{ inputs.environment }}'."
+            exit 1
+          fi
+          echo "id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Point Railway service at the given GHCR image tag
+        run: |
+          IMAGE="ghcr.io/gomarg/${{ github.event.repository.name }}:${{ inputs.image_tag }}"
+          curl -sS -X POST https://backboard.railway.app/graphql/v2 \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"query\":\"mutation(\$serviceId: String!, \$image: String!) { serviceInstanceUpdate(serviceId: \$serviceId, input: { source: { image: \$image } }) }\",\"variables\":{\"serviceId\":\"${{ steps.service.outputs.id }}\",\"image\":\"$IMAGE\"}}" \
+            | tee /tmp/railway-response.json
+          if grep -q '"errors"' /tmp/railway-response.json; then
+            echo "::error::Railway API returned an error — see output above."
+            exit 1
+          fi
