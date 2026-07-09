@@ -61,6 +61,44 @@ jobs:
           REDIS_URL: redis://localhost:6379
           NODE_ENV: test
 
+  # KAN-100: the Next.js frontend under web/ is a separate toolchain from
+  # the Fastify backend above (independent package.json, no Postgres/Redis
+  # dependency — it only ever talks to the gateway over HTTP, fully mocked
+  # in its own tests) — kept as its own parallel job with its own pass/fail
+  # rather than folded into `quality`, per KAN-100's design decisions.
+  quality-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: GoMarg/gmleads-shared
+          path: gmleads-shared-src
+          ref: develop
+          token: ${{ secrets.SHARED_REPO_PAT }}
+      # Same sibling-checkout trick as the `quality` job above — web/'s
+      # @gmleads/shared dependency is `file:../../gmleads-shared`, which
+      # resolves to the same ../gmleads-shared location relative to this
+      # repo's checkout root.
+      - run: cp -r gmleads-shared-src ../gmleads-shared
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: "npm", cache-dependency-path: web/package-lock.json }
+      - name: Build @gmleads/shared
+        working-directory: ../gmleads-shared
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - working-directory: web
+        run: npm ci
+      - working-directory: web
+        run: npm run typecheck
+      - working-directory: web
+        run: npm run lint
+      - working-directory: web
+        run: npm test
+      - working-directory: web
+        run: npm run build
+
   # Publishes a container image to GHCR after quality passes, on push to
   # develop/main or manual dispatch (dispatch exists so this can be verified
   # on a feature branch before merging — see ENGINEERING_STANDARDS.md's
