@@ -5,7 +5,13 @@ import { registerRoutes } from './routes.js';
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
-      redact: ['req.headers.authorization', 'req.body.slackWebhookUrl'],
+      redact: [
+        'req.headers.authorization',
+        'req.body.slackWebhookUrl',
+        'req.body.adminPassword',
+        'req.body.password',
+        'req.body.refreshToken',
+      ],
     },
   });
   registerErrorHandler(app);

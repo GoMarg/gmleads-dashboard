@@ -33,12 +33,14 @@ afterAll(async () => {
   await db.end();
 });
 
+const adminCreds = { adminEmail: 'admin@acme.test', adminPassword: 'correct-horse-battery' };
+
 describe('POST /internal/workspaces', () => {
   it('creates a workspace with a generated embed key', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme Corp' },
+      payload: { name: 'Acme Corp', ...adminCreds },
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
@@ -51,7 +53,7 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme', icpDefinition: { scoreThreshold: 40 } },
+      payload: { name: 'Acme', icpDefinition: { scoreThreshold: 40 }, ...adminCreds },
     });
     const body = res.json();
     expect(body.icpDefinition).toEqual({
@@ -66,7 +68,7 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: '' },
+      payload: { name: '', ...adminCreds },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -75,7 +77,7 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme', slackWebhookUrl: 'not-a-url' },
+      payload: { name: 'Acme', slackWebhookUrl: 'not-a-url', ...adminCreds },
     });
     expect(res.statusCode).toBe(400);
   });
@@ -85,7 +87,7 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme', slackChannelUrl: channelUrl },
+      payload: { name: 'Acme', slackChannelUrl: channelUrl, ...adminCreds },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().slackChannelUrl).toBe(channelUrl);
@@ -95,7 +97,7 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme' },
+      payload: { name: 'Acme', ...adminCreds },
     });
     expect(res.statusCode).toBe(201);
     expect(res.json().slackChannelUrl).toBeNull();
@@ -105,9 +107,45 @@ describe('POST /internal/workspaces', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/internal/workspaces',
-      payload: { name: 'Acme', slackChannelUrl: 'javascript:alert(1)' },
+      payload: { name: 'Acme', slackChannelUrl: 'javascript:alert(1)', ...adminCreds },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  // KAN-99
+  it('rejects a missing adminEmail', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme', adminPassword: 'correct-horse-battery' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects an adminPassword shorter than 8 characters', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme', adminEmail: 'admin@acme.test', adminPassword: 'short' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('creates exactly one user, scoped to the new workspace, able to log in', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/internal/workspaces',
+      payload: { name: 'Acme', ...adminCreds },
+    });
+    const workspace = createRes.json();
+
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/internal/auth/login',
+      payload: { email: adminCreds.adminEmail, password: adminCreds.adminPassword },
+    });
+    expect(loginRes.statusCode).toBe(200);
+    expect(loginRes.json().workspaceId).toBe(workspace.id);
   });
 });
 
