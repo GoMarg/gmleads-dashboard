@@ -3,3 +3,4 @@
 // ports), so tests exercise the real adapters instead of hand-rolled mocks.
 process.env.DATABASE_URL ??= 'postgresql://postgres:postgres@localhost:15432/gmleads_local';
 process.env.REDIS_URL ??= 'redis://localhost:16379';
+process.env.DASHBOARD_JWT_SECRET ??= 'test-dashboard-jwt-secret';
