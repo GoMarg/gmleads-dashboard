@@ -5,6 +5,7 @@ import {
   loginRequestSchema,
   refreshRequestSchema,
   logoutRequestSchema,
+  respondToAlertRequestSchema,
   hashPassword,
   verifyPassword,
   signAccessToken,
@@ -17,6 +18,16 @@ import { WorkspaceRepo } from './db/workspace.repo.js';
 import { LeadsRepo } from './db/leads.repo.js';
 import { UsersRepo } from './db/users.repo.js';
 import { RefreshTokensRepo } from './db/refresh-tokens.repo.js';
+import { AlertResponsesRepo } from './db/alert-responses.repo.js';
+
+// Query params are always optional ISO strings — undefined means "no bound".
+// Returns undefined for a missing value, null to signal "provided but
+// unparseable" so the caller can 400 instead of silently ignoring it.
+function parseOptionalDate(value: string | undefined): Date | null | undefined {
+  if (value === undefined) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 // A fixed Argon2id hash with no real corresponding password. Verifying
 // against this on an email miss means a login attempt against a
@@ -36,6 +47,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const leadsRepo = new LeadsRepo(db);
   const usersRepo = new UsersRepo(db);
   const refreshTokensRepo = new RefreshTokensRepo(db);
+  const alertResponsesRepo = new AlertResponsesRepo(db);
 
   app.post('/internal/workspaces', async (req, reply) => {
     const parsed = createWorkspaceRequestSchema.safeParse(req.body);
@@ -88,6 +100,54 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       const result = await leadsRepo.getSessionWithTurns(req.params.id, req.params.sid);
       if (!result) return reply.code(404).send({ error: 'not_found' });
       return reply.send(result);
+    }
+  );
+
+  // KAN-59 — rep response to an alerted session. 'booked' is recorded
+  // automatically elsewhere (gmleads-session's slot.booked handler) and is
+  // deliberately not postable here (respondToAlertRequestSchema rejects
+  // it). Idempotent: if this session already has a response (from either
+  // path), returns whichever action actually persisted, not necessarily
+  // the one this call requested — first response wins, enforced by
+  // alert_responses' own UNIQUE(session_id) constraint.
+  app.post<{ Params: { id: string; sid: string } }>(
+    '/internal/workspaces/:id/sessions/:sid/respond',
+    async (req, reply) => {
+      const parsed = respondToAlertRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+
+      const result = await leadsRepo.getSessionWithTurns(req.params.id, req.params.sid);
+      if (!result) return reply.code(404).send({ error: 'not_found' });
+
+      const response = await alertResponsesRepo.respond(
+        req.params.sid,
+        req.params.id,
+        parsed.data.action
+      );
+      return reply.code(200).send(response);
+    }
+  );
+
+  // KAN-59 — avg/median response time + responded/no-response counts for
+  // the workspace, over an optional date range (applied to the alert's
+  // delivery instant). Literal AC wording is avg/median, not p95 (that's
+  // KAN-51's separate delivery-latency metric).
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    '/internal/workspaces/:id/alerts/response-stats',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const from = parseOptionalDate(req.query.from);
+      const to = parseOptionalDate(req.query.to);
+      if (from === null || to === null) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+      }
+
+      const stats = await alertResponsesRepo.getResponseStats(req.params.id, from, to);
+      return reply.send(stats);
     }
   );
 

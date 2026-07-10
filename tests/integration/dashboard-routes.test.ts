@@ -250,4 +250,242 @@ describe('GET /internal/workspaces/:id/sessions/:sid', () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it('includes responseAction/responseTimeMs, null when never responded (KAN-59)', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}`,
+    });
+    expect(res.json().session.responseAction).toBeNull();
+    expect(res.json().session.responseTimeMs).toBeNull();
+  });
+
+  it('computes responseTimeMs from delivery to response (KAN-59)', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+       VALUES ($1, $2, true, 500, null, NOW() - INTERVAL '10 minutes')`,
+      [sessionId, ws.id]
+    );
+    await db.query(
+      `INSERT INTO alert_responses (session_id, workspace_id, action, created_at)
+       VALUES ($1, $2, 'claimed', NOW() - INTERVAL '4 minutes')`,
+      [sessionId, ws.id]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}`,
+    });
+    const { session } = res.json();
+    expect(session.responseAction).toBe('claimed');
+    // ~6 minutes = 360000ms, allow slack for test execution time
+    expect(session.responseTimeMs).toBeGreaterThan(350_000);
+    expect(session.responseTimeMs).toBeLessThan(370_000);
+  });
+});
+
+describe('POST /internal/workspaces/:id/sessions/:sid/respond', () => {
+  it('records a claimed response', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'claimed' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().action).toBe('claimed');
+    expect(res.json().respondedAt).toBeTruthy();
+  });
+
+  it('records a dismissed response', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'dismissed' },
+    });
+    expect(res.json().action).toBe('dismissed');
+  });
+
+  it('rejects "booked" — that action is server-only, never client-posted', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'booked' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('is idempotent — a second response call returns the first-recorded action (first response wins)', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'claimed' },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'dismissed' },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().action).toBe('claimed'); // unchanged — the first call already won
+  });
+
+  it('404s when the session belongs to a different workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws1.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws2.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'claimed' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s for a nonexistent session', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/00000000-0000-0000-0000-000000000000/respond`,
+      payload: { action: 'claimed' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /internal/workspaces/:id/alerts/response-stats', () => {
+  it('returns null avg/median and zero counts when there is no delivered alert at all', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/response-stats`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      avgMs: null,
+      medianMs: null,
+      respondedCount: 0,
+      noResponseCount: 0,
+    });
+  });
+
+  it('distinguishes responded from no-response alerts (AC3)', async () => {
+    const ws = await createTestWorkspace(db);
+
+    const responded = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason)
+       VALUES ($1, $2, true, 500, null)`,
+      [responded, ws.id]
+    );
+    await db.query(
+      `INSERT INTO alert_responses (session_id, workspace_id, action) VALUES ($1, $2, 'claimed')`,
+      [responded, ws.id]
+    );
+
+    const unresponded = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason)
+       VALUES ($1, $2, true, 500, null)`,
+      [unresponded, ws.id]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/response-stats`,
+    });
+    expect(res.json().respondedCount).toBe(1);
+    expect(res.json().noResponseCount).toBe(1);
+    expect(res.json().avgMs).toBeGreaterThanOrEqual(0);
+    expect(res.json().medianMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('computes avg/median across multiple responded alerts', async () => {
+    const ws = await createTestWorkspace(db);
+
+    for (const minutesAgo of [10, 6]) {
+      const sessionId = await createTestSession(ws.id);
+      await db.query(
+        `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+         VALUES ($1, $2, true, 500, null, NOW() - INTERVAL '${minutesAgo} minutes')`,
+        [sessionId, ws.id]
+      );
+      await db.query(
+        `INSERT INTO alert_responses (session_id, workspace_id, action, created_at)
+         VALUES ($1, $2, 'claimed', NOW() - INTERVAL '${minutesAgo - 2} minutes')`,
+        [sessionId, ws.id]
+      );
+    }
+    // Both responses arrive exactly 2 minutes (120000ms) after delivery.
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/response-stats`,
+    });
+    expect(res.json().respondedCount).toBe(2);
+    expect(res.json().avgMs).toBeGreaterThan(110_000);
+    expect(res.json().avgMs).toBeLessThan(130_000);
+    expect(res.json().medianMs).toBeGreaterThan(110_000);
+    expect(res.json().medianMs).toBeLessThan(130_000);
+  });
+
+  it('filters by from/to date range', async () => {
+    const ws = await createTestWorkspace(db);
+
+    const oldSession = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+       VALUES ($1, $2, true, 500, null, NOW() - INTERVAL '30 days')`,
+      [oldSession, ws.id]
+    );
+
+    const recentSession = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+       VALUES ($1, $2, true, 500, null, NOW())`,
+      [recentSession, ws.id]
+    );
+
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/response-stats?from=${encodeURIComponent(from)}`,
+    });
+    // Only the recent (unresponded) delivery falls in range.
+    expect(res.json().noResponseCount).toBe(1);
+  });
+
+  it('400s for an invalid date', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/response-stats?from=not-a-date`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/alerts/response-stats',
+    });
+    expect(res.statusCode).toBe(404);
+  });
 });

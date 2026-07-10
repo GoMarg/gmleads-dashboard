@@ -1,6 +1,12 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authFetch } from './api-client';
-import type { LeadsResponse, SessionReplayResponse, LeadFilters } from './types';
+import type {
+  LeadsResponse,
+  SessionReplayResponse,
+  LeadFilters,
+  ResponseStats,
+  RespondResponse,
+} from './types';
 
 function buildQueryString(filters: LeadFilters): string {
   const params = new URLSearchParams();
@@ -32,5 +38,39 @@ export function useSessionReplayQuery(workspaceId: string | null, sessionId: str
     queryFn: () =>
       authFetch<SessionReplayResponse>(`/api/workspaces/${workspaceId}/sessions/${sessionId}`),
     enabled: Boolean(workspaceId) && Boolean(sessionId),
+  });
+}
+
+// KAN-59 — avg/median response time + responded/no-response counts. `range`
+// is `undefined` for all-time; otherwise an ISO `from` bound, per the
+// simple presets the UI offers (see leads/page.tsx) rather than a full
+// date-range picker.
+export function useResponseStatsQuery(workspaceId: string | null, from: string | undefined) {
+  return useQuery({
+    queryKey: ['response-stats', workspaceId, from],
+    queryFn: () => {
+      const qs = from ? `?from=${encodeURIComponent(from)}` : '';
+      return authFetch<ResponseStats>(`/api/workspaces/${workspaceId}/alerts/response-stats${qs}`);
+    },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-59 — records a claim/dismiss action. Invalidates both the leads list
+// and this session's replay query so the UI reflects the (possibly
+// already-someone-else's) persisted response immediately, rather than
+// waiting for the next natural refetch.
+export function useRespondMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, action }: { sessionId: string; action: 'claimed' | 'dismissed' }) =>
+      authFetch<RespondResponse>(`/api/workspaces/${workspaceId}/sessions/${sessionId}/respond`, {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['leads', workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ['session-replay', workspaceId] });
+    },
   });
 }
