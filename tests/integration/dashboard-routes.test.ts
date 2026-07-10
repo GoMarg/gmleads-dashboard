@@ -684,3 +684,57 @@ describe('GET /internal/workspaces/:id/alerts/delivery-stats', () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe('GET /internal/workspaces/:id/widget-status', () => {
+  it('returns null lastSeenAt for a workspace with no sessions ever', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/widget-status`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ lastSeenAt: null });
+  });
+
+  it('returns the most recent session timestamp for the workspace', async () => {
+    const ws = await createTestWorkspace(db);
+    const older = await createTestSession(ws.id);
+    await db.query(`UPDATE sessions SET created_at = NOW() - INTERVAL '2 days' WHERE id = $1`, [
+      older,
+    ]);
+    const newer = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/widget-status`,
+    });
+    expect(res.statusCode).toBe(200);
+    const newerSession = await db.query<{ created_at: Date }>(
+      'SELECT created_at FROM sessions WHERE id = $1',
+      [newer]
+    );
+    expect(new Date(res.json().lastSeenAt).getTime()).toBe(
+      newerSession.rows[0]!.created_at.getTime()
+    );
+  });
+
+  it('scopes strictly per workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    await createTestSession(ws1.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws2.id}/widget-status`,
+    });
+    expect(res.json()).toEqual({ lastSeenAt: null });
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/widget-status',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

@@ -19,6 +19,10 @@ export interface DeliveryStats {
   failureCount: number;
 }
 
+export interface WidgetStatus {
+  lastSeenAt: Date | null;
+}
+
 interface FunnelRow {
   visitor_count: string;
   qualified_count: string;
@@ -103,5 +107,17 @@ export class AnalyticsRepo {
       successCount: Number(row.success_count),
       failureCount: Number(row.failure_count),
     };
+  }
+
+  // KAN-101: widget install-verification. Reuses sessions.created_at only
+  // — no new instrumentation, no widget-side ping, no heartbeat. "Last
+  // seen" is simply the most recent session ever created for this
+  // workspace; null means the workspace has never had a session.
+  async getWidgetStatus(workspaceId: string): Promise<WidgetStatus> {
+    const res = await this.db.query<{ last_seen_at: Date | null }>(
+      `SELECT MAX(created_at) AS last_seen_at FROM sessions WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+    return { lastSeenAt: res.rows[0]!.last_seen_at };
   }
 }

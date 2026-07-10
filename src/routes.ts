@@ -192,6 +192,19 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
+  // KAN-101 — widget install-verification. Read-only, no date range (the
+  // AC only needs the single most-recent-session instant, not a range).
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/widget-status',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const status = await analyticsRepo.getWidgetStatus(req.params.id);
+      return reply.send(status);
+    }
+  );
+
   // KAN-99 — auth endpoints (see ADR-013). Called by gmleads-gateway's
   // dashboard-facing /api/auth/* routes, never directly by a client.
   app.post('/internal/auth/login', async (req, reply) => {

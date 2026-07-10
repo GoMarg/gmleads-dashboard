@@ -4,16 +4,18 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { WidgetStatusIndicator } from '@/components/widget-status-indicator';
 
 // Shared authenticated shell for every logged-in page. KAN-100 only built
 // the leads list + session replay underneath this; KAN-59 (alert-to-
-// response time) attached to the existing /leads page, and KAN-58 (funnel +
+// response time) attached to the existing /leads page, KAN-58 (funnel +
 // delivery-latency/success-rate analytics) attaches here as a nested
-// /leads/funnel route so it inherits this same shell without reworking it —
-// see PROJECT_STATUS_JULY_2026.md's Wave 2 sequencing. KAN-60 (usage/quota)
+// /leads/funnel route, and KAN-101 (widget install-verification) adds a
+// compact header indicator — all without reworking this layout — see
+// PROJECT_STATUS_JULY_2026.md's Wave 2 sequencing. KAN-60 (usage/quota)
 // still has room to attach the same way.
 export default function LeadsLayout({ children }: { children: React.ReactNode }): React.ReactElement | null {
-  const { accessToken, isInitializing, logout } = useAuth();
+  const { accessToken, workspaceId, isInitializing, logout } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -43,13 +45,16 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
           <Link href="/leads">Leads</Link>
           <Link href="/leads/funnel">Funnel</Link>
         </nav>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="text-sm text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
-        >
-          Log out
-        </button>
+        <div className="flex items-center gap-4">
+          <WidgetStatusIndicator workspaceId={workspaceId} />
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="text-sm text-black/60 hover:text-black dark:text-white/60 dark:hover:text-white"
+          >
+            Log out
+          </button>
+        </div>
       </header>
       <main className="flex-1 p-6">{children}</main>
     </div>
