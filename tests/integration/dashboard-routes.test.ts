@@ -9,13 +9,22 @@ let app: FastifyInstance;
 
 async function createTestSession(
   workspaceId: string,
-  overrides: { status?: string; icpScore?: number } = {}
+  overrides: { status?: string; icpScore?: number; alertedAt?: Date } = {}
 ): Promise<string> {
+  // Mirrors gmleads-session's real invariant (session.repo.ts's setStatus):
+  // alerted_at is only ever written together with a transition to
+  // 'alerted' (or later, 'booked'/'claimed'/'dismissed' once alerted) — it
+  // is never set for a session that's still 'active'. Defaulting it here
+  // for those two statuses keeps fixture data consistent with production
+  // data shape without every KAN-58 test needing to pass it explicitly.
+  const status = overrides.status ?? 'active';
+  const alertedAt =
+    overrides.alertedAt ?? (status === 'alerted' || status === 'booked' ? new Date() : null);
   const res = await db.query<{ id: string }>(
-    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score)
-     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3)
+    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at)
+     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4)
      RETURNING id`,
-    [workspaceId, overrides.status ?? 'active', overrides.icpScore ?? 0]
+    [workspaceId, status, overrides.icpScore ?? 0, alertedAt]
   );
   return res.rows[0]!.id;
 }
@@ -485,6 +494,192 @@ describe('GET /internal/workspaces/:id/alerts/response-stats', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/alerts/response-stats',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /internal/workspaces/:id/analytics/funnel', () => {
+  it('returns zero counts for a workspace with no sessions', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/funnel`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ visitorCount: 0, qualifiedCount: 0, bookedCount: 0 });
+  });
+
+  it('counts visitors, qualified (alerted), and booked sessions separately — booked implies qualified', async () => {
+    const ws = await createTestWorkspace(db);
+    await createTestSession(ws.id, { status: 'active' });
+    await createTestSession(ws.id, { status: 'alerted' });
+    await createTestSession(ws.id, { status: 'booked' });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/funnel`,
+    });
+    // qualifiedCount is 2, not 1: a booked session necessarily passed
+    // through 'alerted' first (see createTestSession's alertedAt default,
+    // mirroring gmleads-session's real invariant), so it counts toward
+    // both qualified and booked — the funnel stages are cumulative, not
+    // mutually exclusive buckets.
+    expect(res.json()).toEqual({ visitorCount: 3, qualifiedCount: 2, bookedCount: 1 });
+  });
+
+  it('a booked session also counts as qualified (alerted_at is set en route to booked)', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id, { status: 'alerted' });
+    await db.query(`UPDATE sessions SET status = 'booked' WHERE id = $1`, [sessionId]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/funnel`,
+    });
+    expect(res.json()).toEqual({ visitorCount: 1, qualifiedCount: 1, bookedCount: 1 });
+  });
+
+  it('filters by from/to date range on session creation', async () => {
+    const ws = await createTestWorkspace(db);
+    const oldSession = await createTestSession(ws.id);
+    await db.query(`UPDATE sessions SET created_at = NOW() - INTERVAL '30 days' WHERE id = $1`, [
+      oldSession,
+    ]);
+    await createTestSession(ws.id);
+
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/funnel?from=${encodeURIComponent(from)}`,
+    });
+    expect(res.json().visitorCount).toBe(1);
+  });
+
+  it('scopes strictly per workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    await createTestSession(ws1.id);
+    await createTestSession(ws1.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws2.id}/analytics/funnel`,
+    });
+    expect(res.json().visitorCount).toBe(0);
+  });
+
+  it('400s for an invalid date', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/funnel?from=not-a-date`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/analytics/funnel',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /internal/workspaces/:id/alerts/delivery-stats', () => {
+  it('returns null p50/p95 and zero counts when there are no delivery attempts', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/delivery-stats`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ p50Ms: null, p95Ms: null, successCount: 0, failureCount: 0 });
+  });
+
+  it('computes p50/p95 latency and success/failure counts', async () => {
+    const ws = await createTestWorkspace(db);
+    for (const latencyMs of [100, 200, 300, 400, 900]) {
+      const sessionId = await createTestSession(ws.id);
+      await db.query(
+        `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason)
+         VALUES ($1, $2, true, $3, null)`,
+        [sessionId, ws.id, latencyMs]
+      );
+    }
+    const failedSession = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason)
+       VALUES ($1, $2, false, 5000, 'webhook_timeout')`,
+      [failedSession, ws.id]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/delivery-stats`,
+    });
+    const body = res.json();
+    expect(body.successCount).toBe(5);
+    expect(body.failureCount).toBe(1);
+    expect(body.p50Ms).toBe(300);
+    expect(body.p95Ms).toBeGreaterThan(300);
+  });
+
+  it('filters by from/to date range on delivery attempt time', async () => {
+    const ws = await createTestWorkspace(db);
+    const oldSession = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+       VALUES ($1, $2, true, 500, null, NOW() - INTERVAL '30 days')`,
+      [oldSession, ws.id]
+    );
+    const recentSession = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason, created_at)
+       VALUES ($1, $2, true, 700, null, NOW())`,
+      [recentSession, ws.id]
+    );
+
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/delivery-stats?from=${encodeURIComponent(from)}`,
+    });
+    expect(res.json().successCount).toBe(1);
+    expect(res.json().p50Ms).toBe(700);
+  });
+
+  it('scopes strictly per workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws1.id);
+    await db.query(
+      `INSERT INTO alert_deliveries (session_id, workspace_id, success, latency_ms, failure_reason)
+       VALUES ($1, $2, true, 500, null)`,
+      [sessionId, ws1.id]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws2.id}/alerts/delivery-stats`,
+    });
+    expect(res.json()).toEqual({ p50Ms: null, p95Ms: null, successCount: 0, failureCount: 0 });
+  });
+
+  it('400s for an invalid date', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/alerts/delivery-stats?from=not-a-date`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/alerts/delivery-stats',
     });
     expect(res.statusCode).toBe(404);
   });

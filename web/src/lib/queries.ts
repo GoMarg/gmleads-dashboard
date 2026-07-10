@@ -6,6 +6,8 @@ import type {
   LeadFilters,
   ResponseStats,
   RespondResponse,
+  FunnelStats,
+  DeliveryStats,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -51,6 +53,33 @@ export function useResponseStatsQuery(workspaceId: string | null, from: string |
     queryFn: () => {
       const qs = from ? `?from=${encodeURIComponent(from)}` : '';
       return authFetch<ResponseStats>(`/api/workspaces/${workspaceId}/alerts/response-stats${qs}`);
+    },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-58 — funnel stage counts (visitor/qualified/booked) over an optional
+// date range. Same `from`-only preset convention as KAN-59's response-stats
+// query above (undefined = all-time).
+export function useFunnelStatsQuery(workspaceId: string | null, from: string | undefined) {
+  return useQuery({
+    queryKey: ['funnel-stats', workspaceId, from],
+    queryFn: () => {
+      const qs = from ? `?from=${encodeURIComponent(from)}` : '';
+      return authFetch<FunnelStats>(`/api/workspaces/${workspaceId}/analytics/funnel${qs}`);
+    },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-58 — delivery latency p50/p95 + success/failure counts over an
+// optional date range.
+export function useDeliveryStatsQuery(workspaceId: string | null, from: string | undefined) {
+  return useQuery({
+    queryKey: ['delivery-stats', workspaceId, from],
+    queryFn: () => {
+      const qs = from ? `?from=${encodeURIComponent(from)}` : '';
+      return authFetch<DeliveryStats>(`/api/workspaces/${workspaceId}/alerts/delivery-stats${qs}`);
     },
     enabled: Boolean(workspaceId),
   });

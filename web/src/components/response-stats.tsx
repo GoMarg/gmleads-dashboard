@@ -5,7 +5,9 @@ import type { ResponseStats as ResponseStatsData } from '@/lib/types';
 
 export type RangePreset = '7d' | '30d' | 'all';
 
-const RANGE_LABELS: Record<RangePreset, string> = {
+// Exported so KAN-58's funnel/delivery-stats panels reuse the same three
+// presets and labels rather than redefining them.
+export const RANGE_LABELS: Record<RangePreset, string> = {
   '7d': 'Last 7 days',
   '30d': 'Last 30 days',
   all: 'All time',
@@ -17,7 +19,9 @@ export function rangeToFromDate(range: RangePreset): string | undefined {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function StatTile({ label, value }: { label: string; value: string }): React.ReactElement {
+// Exported so KAN-58's funnel and delivery-stats panels reuse this exact
+// tile rather than redefining it — see funnel-stats.tsx/delivery-stats.tsx.
+export function StatTile({ label, value }: { label: string; value: string }): React.ReactElement {
   return (
     <div className="rounded-md border border-black/10 px-4 py-3 dark:border-white/15">
       <p className="text-xs text-black/50 dark:text-white/50">{label}</p>
