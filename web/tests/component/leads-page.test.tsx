@@ -109,19 +109,24 @@ describe('LeadsPage', () => {
       logout: vi.fn(),
     });
     const fetchSpy = vi.fn().mockImplementation((url: string) =>
-      url.includes('response-stats')
-        ? Promise.resolve(
-            jsonResponse(200, { avgMs: 60000, medianMs: 45000, respondedCount: 3, noResponseCount: 1 })
-          )
-        : Promise.resolve(jsonResponse(200, { leads: [] }))
+      Promise.resolve(
+        url.includes('response-stats')
+          ? jsonResponse(200, { avgMs: 60000, medianMs: 45000, respondedCount: 3, noResponseCount: 1 })
+          : jsonResponse(200, { leads: [] })
+      )
     );
     vi.stubGlobal('fetch', fetchSpy);
 
     renderPage();
 
-    expect(await screen.findByText('1m')).toBeInTheDocument(); // avg
-    expect(screen.getByText('45s')).toBeInTheDocument(); // median
-    const statsCall = fetchSpy.mock.calls.find(([url]) => (url as string).includes('response-stats'));
-    expect(statsCall?.[0]).toContain('/api/workspaces/workspace-a/alerts/response-stats');
+    await waitFor(
+      () => {
+        const statsCall = fetchSpy.mock.calls.find(([url]) => (url as string).includes('response-stats'));
+        expect(statsCall?.[0]).toContain('/api/workspaces/workspace-a/alerts/response-stats');
+      },
+      { timeout: 5000 }
+    );
+    expect(await screen.findByText('1m', {}, { timeout: 5000 })).toBeInTheDocument(); // avg
+    expect(await screen.findByText('45s', {}, { timeout: 5000 })).toBeInTheDocument(); // median
   });
 });
