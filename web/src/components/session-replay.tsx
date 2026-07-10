@@ -25,10 +25,11 @@ function TurnBubble({ turn }: { turn: ConversationTurnDto }): React.ReactElement
   );
 }
 
-// KAN-59: minimal claim/dismiss trigger — no rep identity captured (see
-// ADR-015), first response wins server-side regardless of what's clicked
-// here. 'booked' is never shown as a button — it's recorded automatically
-// from the widget's own booking flow.
+// KAN-59: minimal claim/dismiss trigger — no rep identity captured, by
+// design (see decisions.md in gmleads-agents), first response wins
+// server-side regardless of what's clicked here. 'booked' is never shown
+// as a button — it's recorded automatically from the widget's own booking
+// flow.
 function ResponseActions({ session }: { session: Lead }): React.ReactElement | null {
   const { workspaceId } = useAuth();
   const respond = useRespondMutation(workspaceId);
