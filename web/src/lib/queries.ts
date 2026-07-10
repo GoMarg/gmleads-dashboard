@@ -8,6 +8,7 @@ import type {
   RespondResponse,
   FunnelStats,
   DeliveryStats,
+  WidgetStatus,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -81,6 +82,18 @@ export function useDeliveryStatsQuery(workspaceId: string | null, from: string |
       const qs = from ? `?from=${encodeURIComponent(from)}` : '';
       return authFetch<DeliveryStats>(`/api/workspaces/${workspaceId}/alerts/delivery-stats${qs}`);
     },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-101 — widget install-verification. No date range, no polling/
+// refetchInterval — a single fetch per mount, same as every other query
+// here (React Query's default staleTime/refetch-on-focus behavior
+// already applies uniformly across the app; nothing added on top of it).
+export function useWidgetStatusQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['widget-status', workspaceId],
+    queryFn: () => authFetch<WidgetStatus>(`/api/workspaces/${workspaceId}/widget-status`),
     enabled: Boolean(workspaceId),
   });
 }

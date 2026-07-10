@@ -63,3 +63,8 @@ export interface RespondResponse {
   action: AlertResponseAction;
   respondedAt: string;
 }
+
+// KAN-101
+export interface WidgetStatus {
+  lastSeenAt: string | null;
+}
