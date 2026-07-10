@@ -44,6 +44,21 @@ export interface ResponseStats {
   noResponseCount: number;
 }
 
+// KAN-58
+export interface FunnelStats {
+  visitorCount: number;
+  qualifiedCount: number;
+  bookedCount: number;
+}
+
+// KAN-58
+export interface DeliveryStats {
+  p50Ms: number | null;
+  p95Ms: number | null;
+  successCount: number;
+  failureCount: number;
+}
+
 export interface RespondResponse {
   action: AlertResponseAction;
   respondedAt: string;

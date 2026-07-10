@@ -19,6 +19,7 @@ import { LeadsRepo } from './db/leads.repo.js';
 import { UsersRepo } from './db/users.repo.js';
 import { RefreshTokensRepo } from './db/refresh-tokens.repo.js';
 import { AlertResponsesRepo } from './db/alert-responses.repo.js';
+import { AnalyticsRepo } from './db/analytics.repo.js';
 
 // Query params are always optional ISO strings — undefined means "no bound".
 // Returns undefined for a missing value, null to signal "provided but
@@ -48,6 +49,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const usersRepo = new UsersRepo(db);
   const refreshTokensRepo = new RefreshTokensRepo(db);
   const alertResponsesRepo = new AlertResponsesRepo(db);
+  const analyticsRepo = new AnalyticsRepo(db);
 
   app.post('/internal/workspaces', async (req, reply) => {
     const parsed = createWorkspaceRequestSchema.safeParse(req.body);
@@ -147,6 +149,45 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const stats = await alertResponsesRepo.getResponseStats(req.params.id, from, to);
+      return reply.send(stats);
+    }
+  );
+
+  // KAN-58 — funnel stage counts (visitor/qualified/booked) over an
+  // optional date range applied to session creation. Read-only, same
+  // date-range/404 pattern as KAN-59's response-stats route above.
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    '/internal/workspaces/:id/analytics/funnel',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const from = parseOptionalDate(req.query.from);
+      const to = parseOptionalDate(req.query.to);
+      if (from === null || to === null) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+      }
+
+      const stats = await analyticsRepo.getFunnelStats(req.params.id, from, to);
+      return reply.send(stats);
+    }
+  );
+
+  // KAN-58 — alert delivery health (p50/p95 latency, success/failure
+  // counts) over alert_deliveries (KAN-51/102), same date-range convention.
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    '/internal/workspaces/:id/alerts/delivery-stats',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const from = parseOptionalDate(req.query.from);
+      const to = parseOptionalDate(req.query.to);
+      if (from === null || to === null) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+      }
+
+      const stats = await analyticsRepo.getDeliveryStats(req.params.id, from, to);
       return reply.send(stats);
     }
   );
