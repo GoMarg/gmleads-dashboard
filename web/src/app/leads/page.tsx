@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useLeadsQuery, useResponseStatsQuery } from '@/lib/queries';
 import { LeadsTable } from '@/components/leads-table';
@@ -22,7 +22,12 @@ export default function LeadsPage(): React.ReactElement {
     limit: PAGE_SIZE,
     offset,
   });
-  const { data: stats } = useResponseStatsQuery(workspaceId, rangeToFromDate(range));
+  // rangeToFromDate computes a fresh Date.now()-based string, so it must be
+  // memoized on `range` alone — calling it inline on every render would
+  // change the query's `from` value (and therefore its query key) each
+  // render, defeating caching and re-fetching on every unrelated re-render.
+  const from = useMemo(() => rangeToFromDate(range), [range]);
+  const { data: stats } = useResponseStatsQuery(workspaceId, from);
 
   const handleFiltersChange = (next: LeadsFilterState): void => {
     setFilters(next);
