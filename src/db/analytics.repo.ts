@@ -23,6 +23,13 @@ export interface WidgetStatus {
   lastSeenAt: Date | null;
 }
 
+export interface IdentificationAccuracyStats {
+  resolvedCount: number;
+  unknownCount: number;
+  failedCount: number;
+  lowConfidenceCount: number;
+}
+
 interface FunnelRow {
   visitor_count: string;
   qualified_count: string;
@@ -35,6 +42,19 @@ interface DeliveryRow {
   success_count: string;
   failure_count: string;
 }
+
+interface IdentificationAccuracyRow {
+  resolved_count: string;
+  unknown_count: string;
+  failed_count: string;
+  low_confidence_count: string;
+}
+
+// Below this, an ipapi (org/ISP-derived) match is considered too weak to
+// treat as a confident company identification — matches ipapi.adapter.ts's
+// typical 0.2 confidence for a real (non-"Unknown") match, distinct from
+// leadfeeder's 0.5-0.9 range.
+const LOW_CONFIDENCE_THRESHOLD = 0.3;
 
 export class AnalyticsRepo {
   constructor(private db: IDatabase) {}
@@ -119,5 +139,49 @@ export class AnalyticsRepo {
       [workspaceId]
     );
     return { lastSeenAt: res.rows[0]!.last_seen_at };
+  }
+
+  // KAN-40: identification accuracy reporting. Reuses sessions.firmographics
+  // only — no new table/column/event. Three real states already exist in
+  // that JSONB column (see gmleads-identify's adapters):
+  //   - resolved: source IN ('leadfeeder','ipapi') — a real company match
+  //   - unknown: source = 'unknown' — both providers ran but found nothing
+  //   - failed: firmographics IS NULL — the resolution pipeline itself
+  //     threw before publishing visitor.identified (identify's events.ts
+  //     catches this, logs it, and returns without publishing — proven by
+  //     gmleads-identify's own existing integration test — so this state
+  //     was previously invisible outside transient logs)
+  // lowConfidenceCount is a subset of resolved (excludes unknown, which
+  // already has confidence 0 by construction) — flags weak-but-real matches
+  // (typically ipapi's ~0.2) for review, per the AC.
+  async getIdentificationAccuracyStats(
+    workspaceId: string,
+    from: Date | undefined,
+    to: Date | undefined
+  ): Promise<IdentificationAccuracyStats> {
+    const res = await this.db.query<IdentificationAccuracyRow>(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE firmographics->>'source' IN ('leadfeeder', 'ipapi')
+         ) AS resolved_count,
+         COUNT(*) FILTER (WHERE firmographics->>'source' = 'unknown') AS unknown_count,
+         COUNT(*) FILTER (WHERE firmographics IS NULL) AS failed_count,
+         COUNT(*) FILTER (
+           WHERE firmographics->>'source' IN ('leadfeeder', 'ipapi')
+             AND (firmographics->>'confidence')::float < $4
+         ) AS low_confidence_count
+       FROM sessions
+       WHERE workspace_id = $1
+         AND ($2::timestamptz IS NULL OR created_at >= $2)
+         AND ($3::timestamptz IS NULL OR created_at <= $3)`,
+      [workspaceId, from ?? null, to ?? null, LOW_CONFIDENCE_THRESHOLD]
+    );
+    const row = res.rows[0]!;
+    return {
+      resolvedCount: Number(row.resolved_count),
+      unknownCount: Number(row.unknown_count),
+      failedCount: Number(row.failed_count),
+      lowConfidenceCount: Number(row.low_confidence_count),
+    };
   }
 }

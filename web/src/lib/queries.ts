@@ -9,12 +9,14 @@ import type {
   FunnelStats,
   DeliveryStats,
   WidgetStatus,
+  IdentificationAccuracyStats,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
   const params = new URLSearchParams();
   if (filters.status) params.set('status', filters.status);
   if (filters.minScore !== undefined) params.set('minScore', String(filters.minScore));
+  if (filters.identificationSource) params.set('identificationSource', filters.identificationSource);
   if (filters.limit !== undefined) params.set('limit', String(filters.limit));
   if (filters.offset !== undefined) params.set('offset', String(filters.offset));
   const qs = params.toString();
@@ -81,6 +83,25 @@ export function useDeliveryStatsQuery(workspaceId: string | null, from: string |
     queryFn: () => {
       const qs = from ? `?from=${encodeURIComponent(from)}` : '';
       return authFetch<DeliveryStats>(`/api/workspaces/${workspaceId}/alerts/delivery-stats${qs}`);
+    },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-40 — identification accuracy (resolved/unknown/failed/low-confidence
+// counts) over an optional date range, same `from`-only convention as
+// KAN-58's funnel/delivery-stats queries.
+export function useIdentificationAccuracyQuery(
+  workspaceId: string | null,
+  from: string | undefined
+) {
+  return useQuery({
+    queryKey: ['identification-accuracy', workspaceId, from],
+    queryFn: () => {
+      const qs = from ? `?from=${encodeURIComponent(from)}` : '';
+      return authFetch<IdentificationAccuracyStats>(
+        `/api/workspaces/${workspaceId}/analytics/identification-accuracy${qs}`
+      );
     },
     enabled: Boolean(workspaceId),
   });

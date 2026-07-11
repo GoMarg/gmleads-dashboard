@@ -85,9 +85,17 @@ function toTurn(row: TurnRow): ConversationTurn {
   };
 }
 
+// KAN-40: 'failed' is a sentinel value, not a real Firmographics.source —
+// it means the identification pipeline threw before ever publishing
+// visitor.identified, so firmographics is NULL rather than containing a
+// source at all. 'leadfeeder'/'ipapi'/'unknown' match Firmographics.source
+// exactly (@gmleads/shared/src/types).
+export type IdentificationSourceFilter = 'leadfeeder' | 'ipapi' | 'unknown' | 'failed';
+
 export interface LeadFilters {
   status?: SessionStatus;
   minScore?: number;
+  identificationSource?: IdentificationSourceFilter;
   limit?: number;
   offset?: number;
 }
@@ -106,6 +114,12 @@ export class LeadsRepo {
     if (filters.minScore !== undefined) {
       params.push(filters.minScore);
       conditions.push(`s.icp_score >= $${params.length}`);
+    }
+    if (filters.identificationSource === 'failed') {
+      conditions.push('s.firmographics IS NULL');
+    } else if (filters.identificationSource !== undefined) {
+      params.push(filters.identificationSource);
+      conditions.push(`s.firmographics->>'source' = $${params.length}`);
     }
 
     const limit = Math.min(filters.limit ?? 50, 200);

@@ -2,9 +2,10 @@
 
 import { useState, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { useFunnelStatsQuery, useDeliveryStatsQuery } from '@/lib/queries';
+import { useFunnelStatsQuery, useDeliveryStatsQuery, useIdentificationAccuracyQuery } from '@/lib/queries';
 import { FunnelStats } from '@/components/funnel-stats';
 import { DeliveryStats } from '@/components/delivery-stats';
+import { IdentificationAccuracyStats } from '@/components/identification-accuracy-stats';
 import { rangeToFromDate, RANGE_LABELS, type RangePreset } from '@/components/response-stats';
 
 // KAN-58: nested under /leads (rather than a new top-level /funnel route)
@@ -32,6 +33,11 @@ export default function FunnelPage(): React.ReactElement {
     isLoading: deliveryLoading,
     isError: deliveryError,
   } = useDeliveryStatsQuery(workspaceId, from);
+  const {
+    data: identificationAccuracy,
+    isLoading: identificationLoading,
+    isError: identificationError,
+  } = useIdentificationAccuracyQuery(workspaceId, from);
 
   return (
     <div className="flex flex-col gap-6">
@@ -50,15 +56,16 @@ export default function FunnelPage(): React.ReactElement {
         </select>
       </div>
 
-      {(funnelLoading || deliveryLoading) && (
+      {(funnelLoading || deliveryLoading || identificationLoading) && (
         <p className="text-sm text-black/50 dark:text-white/50">Loading…</p>
       )}
-      {(funnelError || deliveryError) && (
+      {(funnelError || deliveryError || identificationError) && (
         <p className="text-sm text-red-600">Could not load analytics. Please try again.</p>
       )}
 
       <FunnelStats stats={funnel} />
       <DeliveryStats stats={delivery} />
+      <IdentificationAccuracyStats stats={identificationAccuracy} />
     </div>
   );
 }

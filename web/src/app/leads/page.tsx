@@ -11,7 +11,11 @@ const PAGE_SIZE = 50;
 
 export default function LeadsPage(): React.ReactElement {
   const { workspaceId } = useAuth();
-  const [filters, setFilters] = useState<LeadsFilterState>({ status: '', minScore: '' });
+  const [filters, setFilters] = useState<LeadsFilterState>({
+    status: '',
+    minScore: '',
+    identificationSource: '',
+  });
   const [offset, setOffset] = useState(0);
   const [range, setRange] = useState<RangePreset>('7d');
 
@@ -19,6 +23,7 @@ export default function LeadsPage(): React.ReactElement {
   const { data, isLoading, isError } = useLeadsQuery(workspaceId, {
     status: filters.status || undefined,
     minScore,
+    identificationSource: filters.identificationSource || undefined,
     limit: PAGE_SIZE,
     offset,
   });

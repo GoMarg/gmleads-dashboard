@@ -100,6 +100,30 @@ describe('LeadsPage', () => {
     expect(leadsCalls()[1]).toContain('status=booked');
   });
 
+  // KAN-40
+  it('refetches with the identificationSource filter applied when changed', async () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    const fetchSpy = vi.fn().mockResolvedValue(jsonResponse(200, { leads: [] }));
+    vi.stubGlobal('fetch', fetchSpy);
+    const leadsCalls = (): string[] =>
+      fetchSpy.mock.calls.map(([url]) => url as string).filter((url) => url.includes('/leads'));
+
+    renderPage();
+    await waitFor(() => expect(leadsCalls()).toHaveLength(1));
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Identification'), 'failed');
+
+    await waitFor(() => expect(leadsCalls()).toHaveLength(2));
+    expect(leadsCalls()[1]).toContain('identificationSource=failed');
+  });
+
   it('fetches response-time stats scoped to the authenticated workspace (KAN-59)', async () => {
     mockUseAuth.mockReturnValue({
       accessToken: 'token',
