@@ -4,9 +4,15 @@ import type { SessionStatus } from '@/lib/types';
 
 const STATUSES: SessionStatus[] = ['active', 'alerted', 'claimed', 'booked', 'ended'];
 
+// KAN-40: 'failed' is a sentinel (no firmographics at all), not a real
+// Firmographics.source value — see leads.repo.ts's IdentificationSourceFilter.
+const IDENTIFICATION_SOURCES = ['leadfeeder', 'ipapi', 'unknown', 'failed'] as const;
+type IdentificationSourceFilterValue = (typeof IDENTIFICATION_SOURCES)[number];
+
 export interface LeadsFilterState {
   status: SessionStatus | '';
   minScore: string; // kept as raw string while editing; parsed by the caller
+  identificationSource: IdentificationSourceFilterValue | '';
 }
 
 export function LeadsFilters({
@@ -50,6 +56,30 @@ export function LeadsFilters({
           onChange={(e) => onChange({ ...value, minScore: e.target.value })}
           className="w-24 rounded-md border border-black/10 bg-transparent px-2 py-1.5 text-sm dark:border-white/15"
         />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="identification-source-filter" className="text-sm font-medium">
+          Identification
+        </label>
+        <select
+          id="identification-source-filter"
+          value={value.identificationSource}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              identificationSource: e.target.value as IdentificationSourceFilterValue | '',
+            })
+          }
+          className="rounded-md border border-black/10 bg-transparent px-2 py-1.5 text-sm dark:border-white/15"
+        >
+          <option value="">All</option>
+          {IDENTIFICATION_SOURCES.map((source) => (
+            <option key={source} value={source} className="capitalize">
+              {source}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

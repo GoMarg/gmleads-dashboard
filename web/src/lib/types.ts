@@ -29,9 +29,14 @@ export interface SessionReplayResponse {
   turns: ConversationTurnDto[];
 }
 
+// KAN-40: 'failed' is a sentinel (no firmographics at all), not a real
+// Firmographics.source value.
+export type IdentificationSourceFilter = 'leadfeeder' | 'ipapi' | 'unknown' | 'failed';
+
 export interface LeadFilters {
   status?: SessionStatus;
   minScore?: number;
+  identificationSource?: IdentificationSourceFilter;
   limit?: number;
   offset?: number;
 }
@@ -57,6 +62,14 @@ export interface DeliveryStats {
   p95Ms: number | null;
   successCount: number;
   failureCount: number;
+}
+
+// KAN-40
+export interface IdentificationAccuracyStats {
+  resolvedCount: number;
+  unknownCount: number;
+  failedCount: number;
+  lowConfidenceCount: number;
 }
 
 export interface RespondResponse {

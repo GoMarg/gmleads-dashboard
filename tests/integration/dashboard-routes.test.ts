@@ -9,7 +9,12 @@ let app: FastifyInstance;
 
 async function createTestSession(
   workspaceId: string,
-  overrides: { status?: string; icpScore?: number; alertedAt?: Date } = {}
+  overrides: {
+    status?: string;
+    icpScore?: number;
+    alertedAt?: Date;
+    firmographics?: Record<string, unknown> | null;
+  } = {}
 ): Promise<string> {
   // Mirrors gmleads-session's real invariant (session.repo.ts's setStatus):
   // alerted_at is only ever written together with a transition to
@@ -20,11 +25,25 @@ async function createTestSession(
   const status = overrides.status ?? 'active';
   const alertedAt =
     overrides.alertedAt ?? (status === 'alerted' || status === 'booked' ? new Date() : null);
+  // KAN-40: pass the raw object (never JSON.stringify it) for a jsonb
+  // column bound through db.query()'s non-transactional path — passing an
+  // already-stringified value here double-encodes it (Postgres stores it
+  // as a JSON *string* scalar, not an object; jsonb_typeof comes back
+  // 'string', and ->>'source' extraction silently returns NULL). Verified
+  // directly against Postgres while building this test. `firmographics:
+  // null` still means SQL NULL (the 'failed identification' case), not
+  // the JSON literal null, because it's passed through untouched here.
   const res = await db.query<{ id: string }>(
-    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at)
-     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4)
+    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at, firmographics)
+     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4, $5)
      RETURNING id`,
-    [workspaceId, status, overrides.icpScore ?? 0, alertedAt]
+    [
+      workspaceId,
+      status,
+      overrides.icpScore ?? 0,
+      alertedAt,
+      overrides.firmographics !== undefined ? overrides.firmographics : null,
+    ]
   );
   return res.rows[0]!.id;
 }
@@ -217,6 +236,39 @@ describe('GET /internal/workspaces/:id/leads', () => {
       url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/leads',
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  // KAN-40
+  it('filters by identificationSource, matching resolved sources exactly', async () => {
+    const ws = await createTestWorkspace(db);
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Unknown', industry: null, employeeRange: null, confidence: 0, source: 'unknown' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/leads?identificationSource=leadfeeder`,
+    });
+    expect(res.json().leads).toHaveLength(1);
+    expect(res.json().leads[0].firmographics.source).toBe('leadfeeder');
+  });
+
+  it('filters by identificationSource=failed, matching sessions with no firmographics at all', async () => {
+    const ws = await createTestWorkspace(db);
+    await createTestSession(ws.id, { firmographics: null });
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/leads?identificationSource=failed`,
+    });
+    expect(res.json().leads).toHaveLength(1);
+    expect(res.json().leads[0].firmographics).toBeNull();
   });
 });
 
@@ -734,6 +786,138 @@ describe('GET /internal/workspaces/:id/widget-status', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/widget-status',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /internal/workspaces/:id/analytics/identification-accuracy', () => {
+  it('returns all-zero counts for a workspace with no sessions', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/identification-accuracy`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({
+      resolvedCount: 0,
+      unknownCount: 0,
+      failedCount: 0,
+      lowConfidenceCount: 0,
+    });
+  });
+
+  it('categorizes resolved, unknown, and failed sessions correctly', async () => {
+    const ws = await createTestWorkspace(db);
+    // Resolved (leadfeeder, high confidence)
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+    // Resolved (ipapi, high confidence — still counts as resolved even though
+    // it's the fallback provider, since it did find a real org/ISP match)
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Some ISP', industry: null, employeeRange: null, confidence: 0.5, source: 'ipapi' },
+    });
+    // Unknown — both providers ran, neither found a match
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Unknown', industry: null, employeeRange: null, confidence: 0, source: 'unknown' },
+    });
+    // Failed — the pipeline itself threw, visitor.identified never
+    // published, firmographics stayed NULL (see gmleads-identify's own
+    // 'publishes an unknown-source result when resolution fails entirely'
+    // test — this is the specific case that ISN'T covered by that test:
+    // the outer try/catch swallowing the error entirely).
+    await createTestSession(ws.id, { firmographics: null });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/identification-accuracy`,
+    });
+    expect(res.json()).toEqual({
+      resolvedCount: 2,
+      unknownCount: 1,
+      failedCount: 1,
+      lowConfidenceCount: 0,
+    });
+  });
+
+  it('flags low-confidence resolved matches (below 0.3), distinct from unknown', async () => {
+    const ws = await createTestWorkspace(db);
+    // Low-confidence but real match (typical ipapi org/ISP hit)
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Some ISP', industry: null, employeeRange: null, confidence: 0.2, source: 'ipapi' },
+    });
+    // High-confidence match — not flagged
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.9, source: 'leadfeeder' },
+    });
+    // Unknown (confidence 0) — must NOT double-count into lowConfidenceCount
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Unknown', industry: null, employeeRange: null, confidence: 0, source: 'unknown' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/identification-accuracy`,
+    });
+    const body = res.json();
+    expect(body.resolvedCount).toBe(2);
+    expect(body.lowConfidenceCount).toBe(1);
+    expect(body.unknownCount).toBe(1);
+  });
+
+  it('filters by from/to date range on session creation', async () => {
+    const ws = await createTestWorkspace(db);
+    const oldSession = await createTestSession(ws.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+    await db.query(`UPDATE sessions SET created_at = NOW() - INTERVAL '30 days' WHERE id = $1`, [
+      oldSession,
+    ]);
+    await createTestSession(ws.id, {
+      firmographics: { company: 'Beta', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/identification-accuracy?from=${encodeURIComponent(from)}`,
+    });
+    expect(res.json().resolvedCount).toBe(1);
+  });
+
+  it('scopes strictly per workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    await createTestSession(ws1.id, {
+      firmographics: { company: 'Acme', industry: null, employeeRange: null, confidence: 0.8, source: 'leadfeeder' },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws2.id}/analytics/identification-accuracy`,
+    });
+    expect(res.json()).toEqual({
+      resolvedCount: 0,
+      unknownCount: 0,
+      failedCount: 0,
+      lowConfidenceCount: 0,
+    });
+  });
+
+  it('400s for an invalid date', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/identification-accuracy?from=not-a-date`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/analytics/identification-accuracy',
     });
     expect(res.statusCode).toBe(404);
   });

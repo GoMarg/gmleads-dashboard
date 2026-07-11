@@ -15,7 +15,7 @@ import {
   type SessionStatus,
 } from '@gmleads/shared';
 import { WorkspaceRepo } from './db/workspace.repo.js';
-import { LeadsRepo } from './db/leads.repo.js';
+import { LeadsRepo, type IdentificationSourceFilter } from './db/leads.repo.js';
 import { UsersRepo } from './db/users.repo.js';
 import { RefreshTokensRepo } from './db/refresh-tokens.repo.js';
 import { AlertResponsesRepo } from './db/alert-responses.repo.js';
@@ -78,15 +78,22 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   app.get<{
     Params: { id: string };
-    Querystring: { status?: string; minScore?: string; limit?: string; offset?: string };
+    Querystring: {
+      status?: string;
+      minScore?: string;
+      identificationSource?: string;
+      limit?: string;
+      offset?: string;
+    };
   }>('/internal/workspaces/:id/leads', async (req, reply) => {
     const workspace = await workspaceRepo.findById(req.params.id);
     if (!workspace) return reply.code(404).send({ error: 'not_found' });
 
-    const { status, minScore, limit, offset } = req.query;
+    const { status, minScore, identificationSource, limit, offset } = req.query;
     const leads = await leadsRepo.listLeads(req.params.id, {
       status: status as SessionStatus | undefined,
       minScore: minScore ? Number(minScore) : undefined,
+      identificationSource: identificationSource as IdentificationSourceFilter | undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -202,6 +209,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
       const status = await analyticsRepo.getWidgetStatus(req.params.id);
       return reply.send(status);
+    }
+  );
+
+  // KAN-40 — identification accuracy reporting (resolved/unknown/failed/
+  // low-confidence counts). Reuses sessions.firmographics only.
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    '/internal/workspaces/:id/analytics/identification-accuracy',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const from = parseOptionalDate(req.query.from);
+      const to = parseOptionalDate(req.query.to);
+      if (from === null || to === null) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+      }
+
+      const stats = await analyticsRepo.getIdentificationAccuracyStats(req.params.id, from, to);
+      return reply.send(stats);
     }
   );
 
