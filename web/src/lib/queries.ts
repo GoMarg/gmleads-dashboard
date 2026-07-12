@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { authFetch } from './api-client';
+import { authFetch, uploadFile } from './api-client';
 import type {
   LeadsResponse,
   SessionReplayResponse,
@@ -10,6 +10,10 @@ import type {
   DeliveryStats,
   WidgetStatus,
   IdentificationAccuracyStats,
+  RepDto,
+  AccountAssignmentDto,
+  RoutingEventDto,
+  CsvUploadResult,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -135,5 +139,68 @@ export function useRespondMutation(workspaceId: string | null) {
       void queryClient.invalidateQueries({ queryKey: ['leads', workspaceId] });
       void queryClient.invalidateQueries({ queryKey: ['session-replay', workspaceId] });
     },
+  });
+}
+
+// KAN-66/67/68/69 — Lead Ownership & Routing.
+
+export function useRepsQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['reps', workspaceId],
+    queryFn: () => authFetch<RepDto[]>(`/api/workspaces/${workspaceId}/reps`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useCreateRepMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; email: string; slackMemberId: string | null }) =>
+      authFetch<RepDto>(`/api/workspaces/${workspaceId}/reps`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['reps', workspaceId] }),
+  });
+}
+
+export function useUpdateRepMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ repId, active }: { repId: string; active: boolean }) =>
+      authFetch<RepDto>(`/api/workspaces/${workspaceId}/reps/${repId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active }),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['reps', workspaceId] }),
+  });
+}
+
+export function useAccountsQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['accounts', workspaceId],
+    queryFn: () => authFetch<AccountAssignmentDto[]>(`/api/workspaces/${workspaceId}/accounts`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// Invalidates both accounts and reps queries — a large CSV upload is the
+// main way an admin discovers typos in rep emails, so the reps list (which
+// doesn't itself change) still needs to be fresh for the next attempt's
+// dropdown/validation UI to reflect anything else added meanwhile.
+export function useUploadAccountsCsvMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) =>
+      uploadFile<CsvUploadResult>(`/api/workspaces/${workspaceId}/accounts/upload`, file),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['accounts', workspaceId] }),
+  });
+}
+
+export function useRoutingAuditQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['routing-audit', workspaceId],
+    queryFn: () => authFetch<RoutingEventDto[]>(`/api/workspaces/${workspaceId}/routing/audit`),
+    enabled: Boolean(workspaceId),
   });
 }

@@ -922,3 +922,245 @@ describe('GET /internal/workspaces/:id/analytics/identification-accuracy', () =>
     expect(res.statusCode).toBe(404);
   });
 });
+
+// KAN-66: builds a raw multipart/form-data body so @fastify/multipart's
+// req.file() can be exercised via app.inject() without a real HTTP client.
+function buildCsvUploadPayload(csv: string): { payload: Buffer; contentType: string } {
+  const boundary = '----kan66TestBoundary';
+  const body =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="accounts.csv"\r\n` +
+    `Content-Type: text/csv\r\n\r\n` +
+    `${csv}\r\n` +
+    `--${boundary}--\r\n`;
+  return { payload: Buffer.from(body), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+describe('reps management (KAN-66)', () => {
+  it('creates a rep and lists it back', async () => {
+    const ws = await createTestWorkspace(db);
+    const createRes = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/reps`,
+      payload: { name: 'Jamie', email: 'jamie@acme.test', slackMemberId: 'U123' },
+    });
+    expect(createRes.statusCode).toBe(201);
+    expect(createRes.json()).toMatchObject({ name: 'Jamie', email: 'jamie@acme.test', active: true });
+
+    const listRes = await app.inject({ method: 'GET', url: `/internal/workspaces/${ws.id}/reps` });
+    expect(listRes.json()).toHaveLength(1);
+  });
+
+  it('rejects an invalid rep payload', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/reps`,
+      payload: { name: 'Jamie', email: 'not-an-email' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('deactivates a rep via PATCH without deleting the row', async () => {
+    const ws = await createTestWorkspace(db);
+    const createRes = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/reps`,
+      payload: { name: 'Jamie', email: 'jamie@acme.test' },
+    });
+    const repId = createRes.json().id;
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/reps/${repId}`,
+      payload: { active: false },
+    });
+    expect(patchRes.json()).toMatchObject({ active: false, name: 'Jamie' });
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/reps',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('account CSV upload (KAN-66)', () => {
+  it('uploads a valid CSV and creates the account assignments', async () => {
+    const ws = await createTestWorkspace(db);
+    await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/reps`,
+      payload: { name: 'Jamie', email: 'jamie@acme.test' },
+    });
+
+    const csv = 'account,repEmail\nacme.com,jamie@acme.test\n';
+    const { payload, contentType } = buildCsvUploadPayload(csv);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/accounts/upload`,
+      headers: { 'content-type': contentType },
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ successCount: 1, errorCount: 0 });
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/accounts`,
+    });
+    expect(listRes.json()).toMatchObject([{ matchType: 'domain', matchKey: 'acme.com' }]);
+  });
+
+  it('reports an unknown rep email as a per-row error without failing the whole upload', async () => {
+    const ws = await createTestWorkspace(db);
+    await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/reps`,
+      payload: { name: 'Jamie', email: 'jamie@acme.test' },
+    });
+
+    const csv = 'account,repEmail\nacme.com,jamie@acme.test\nunknown.com,ghost@acme.test\n';
+    const { payload, contentType } = buildCsvUploadPayload(csv);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/accounts/upload`,
+      headers: { 'content-type': contentType },
+      payload,
+    });
+
+    expect(res.json()).toMatchObject({ successCount: 1, errorCount: 1 });
+    expect(res.json().results[1]).toMatchObject({ status: 'error', account: 'unknown.com' });
+  });
+
+  it('re-uploading the same account upserts rather than duplicates', async () => {
+    const ws = await createTestWorkspace(db);
+    const repA = (
+      await app.inject({
+        method: 'POST',
+        url: `/internal/workspaces/${ws.id}/reps`,
+        payload: { name: 'A', email: 'a@acme.test' },
+      })
+    ).json();
+    const repB = (
+      await app.inject({
+        method: 'POST',
+        url: `/internal/workspaces/${ws.id}/reps`,
+        payload: { name: 'B', email: 'b@acme.test' },
+      })
+    ).json();
+
+    const upload = async (repEmail: string): Promise<void> => {
+      const { payload, contentType } = buildCsvUploadPayload(`account,repEmail\nacme.com,${repEmail}\n`);
+      await app.inject({
+        method: 'POST',
+        url: `/internal/workspaces/${ws.id}/accounts/upload`,
+        headers: { 'content-type': contentType },
+        payload,
+      });
+    };
+
+    await upload('a@acme.test');
+    await upload('b@acme.test'); // re-upload, same account, different rep
+
+    const listRes = await app.inject({ method: 'GET', url: `/internal/workspaces/${ws.id}/accounts` });
+    const rows = listRes.json();
+    expect(rows).toHaveLength(1); // upserted, not duplicated
+    expect(rows[0].repId).toBe(repB.id);
+    expect(rows[0].repId).not.toBe(repA.id);
+  });
+});
+
+describe('routing audit log (KAN-69)', () => {
+  it('exposes routing_events rows written by another service (gmleads-notification)', async () => {
+    const ws = await createTestWorkspace(db);
+    const repId = (
+      await app.inject({
+        method: 'POST',
+        url: `/internal/workspaces/${ws.id}/reps`,
+        payload: { name: 'Jamie', email: 'jamie@acme.test' },
+      })
+    ).json().id;
+    const sessionId = await createTestSession(ws.id);
+
+    // Simulates what gmleads-notification's RoutingRepo.recordEvent writes —
+    // this route only reads, it never writes routing_events itself.
+    await db.query(
+      `INSERT INTO routing_events (workspace_id, session_id, method, matched_key, rep_id)
+       VALUES ($1, $2, 'direct', 'acme.com', $3)`,
+      [ws.id, sessionId, repId]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/routing/audit`,
+    });
+    expect(res.json()).toMatchObject([{ method: 'direct', matchedKey: 'acme.com', repId }]);
+  });
+
+  it('filters by sessionId', async () => {
+    const ws = await createTestWorkspace(db);
+    const session1 = await createTestSession(ws.id);
+    const session2 = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO routing_events (workspace_id, session_id, method) VALUES ($1, $2, 'fallback'), ($1, $3, 'fallback')`,
+      [ws.id, session1, session2]
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/routing/audit?sessionId=${session1}`,
+    });
+    expect(res.json()).toHaveLength(1);
+    expect(res.json()[0]).toMatchObject({ sessionId: session1 });
+  });
+
+  it('filters by repId and by from/to date range', async () => {
+    const ws = await createTestWorkspace(db);
+    const repId = (
+      await app.inject({
+        method: 'POST',
+        url: `/internal/workspaces/${ws.id}/reps`,
+        payload: { name: 'Jamie', email: 'jamie@acme.test' },
+      })
+    ).json().id;
+    const session1 = await createTestSession(ws.id);
+    const session2 = await createTestSession(ws.id);
+    await db.query(
+      `INSERT INTO routing_events (workspace_id, session_id, method, rep_id) VALUES ($1, $2, 'direct', $4), ($1, $3, 'fallback', NULL)`,
+      [ws.id, session1, session2, repId]
+    );
+
+    const byRep = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/routing/audit?repId=${repId}`,
+    });
+    expect(byRep.json()).toHaveLength(1);
+    expect(byRep.json()[0]).toMatchObject({ repId });
+
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const byFrom = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/routing/audit?from=${encodeURIComponent(future)}`,
+    });
+    expect(byFrom.json()).toHaveLength(0); // nothing created after "future"
+
+    const past = new Date(Date.now() - 60_000).toISOString();
+    const byTo = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/routing/audit?to=${encodeURIComponent(past)}`,
+    });
+    expect(byTo.json()).toHaveLength(0); // nothing created before "past"
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/routing/audit',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});

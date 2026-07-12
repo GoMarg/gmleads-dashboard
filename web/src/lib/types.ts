@@ -2,9 +2,38 @@
 // shapes (see contracts.md) rather than redefining them — only overrides
 // the Date fields, since Fastify serializes them as ISO strings over the
 // wire and the shared types model the in-process (Date object) shape.
-import type { Session, ConversationTurn, SessionStatus, AlertResponseAction } from '@gmleads/shared';
+import type {
+  Session,
+  ConversationTurn,
+  SessionStatus,
+  AlertResponseAction,
+  Rep,
+  AccountAssignment,
+  RoutingEvent,
+} from '@gmleads/shared';
 
 export type { SessionStatus, AlertResponseAction };
+
+// KAN-66/67/68/69 — same Date -> ISO-string override pattern as Lead below.
+export type RepDto = Omit<Rep, 'createdAt'> & { createdAt: string };
+export type AccountAssignmentDto = Omit<AccountAssignment, 'createdAt' | 'updatedAt'> & {
+  createdAt: string;
+  updatedAt: string;
+};
+export type RoutingEventDto = Omit<RoutingEvent, 'createdAt'> & { createdAt: string };
+
+export interface CsvUploadResultRow {
+  row: number;
+  status: 'ok' | 'error';
+  account?: string;
+  error?: string;
+}
+
+export interface CsvUploadResult {
+  successCount: number;
+  errorCount: number;
+  results: CsvUploadResultRow[];
+}
 
 // KAN-59: every Lead is a Session enriched with response-time data — see
 // gmleads-dashboard's leads.repo.ts, which always joins the two so this
