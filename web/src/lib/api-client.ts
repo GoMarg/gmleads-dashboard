@@ -114,3 +114,29 @@ export async function authFetch<T>(path: string, init: RequestInit = {}): Promis
   if (!res.ok) throw new ApiError(res.status, await safeJson(res));
   return (await res.json()) as T;
 }
+
+// KAN-66: bypasses rawFetch/authFetch above because a multipart body must
+// let the browser set its own `Content-Type: multipart/form-data;
+// boundary=...` header — rawFetch always forces `application/json`, which
+// would break the upload. Same 401-refresh-and-retry behavior as authFetch,
+// just without the JSON content-type assumption.
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const doUpload = (accessToken: string | undefined): Promise<Response> =>
+    fetch(`${API_URL}${path}`, {
+      method: 'POST',
+      body: formData,
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
+
+  let res = await doUpload(getCurrentTokens()?.accessToken);
+  if (res.status === 401) {
+    const refreshed = await silentRefresh();
+    if (!refreshed) throw new ApiError(401, await safeJson(res));
+    res = await doUpload(refreshed.accessToken);
+  }
+  if (!res.ok) throw new ApiError(res.status, await safeJson(res));
+  return (await res.json()) as T;
+}

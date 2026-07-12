@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { parse as parseCsv } from 'csv-parse/sync';
 import {
   getDb,
   createWorkspaceRequestSchema,
@@ -6,6 +7,10 @@ import {
   refreshRequestSchema,
   logoutRequestSchema,
   respondToAlertRequestSchema,
+  createRepRequestSchema,
+  updateRepRequestSchema,
+  accountCsvRowSchema,
+  classifyMatchKey,
   hashPassword,
   verifyPassword,
   signAccessToken,
@@ -20,6 +25,9 @@ import { UsersRepo } from './db/users.repo.js';
 import { RefreshTokensRepo } from './db/refresh-tokens.repo.js';
 import { AlertResponsesRepo } from './db/alert-responses.repo.js';
 import { AnalyticsRepo } from './db/analytics.repo.js';
+import { RepsRepo } from './db/reps.repo.js';
+import { AccountAssignmentsRepo } from './db/account-assignments.repo.js';
+import { RoutingEventsRepo } from './db/routing-events.repo.js';
 
 // Query params are always optional ISO strings — undefined means "no bound".
 // Returns undefined for a missing value, null to signal "provided but
@@ -50,6 +58,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const refreshTokensRepo = new RefreshTokensRepo(db);
   const alertResponsesRepo = new AlertResponsesRepo(db);
   const analyticsRepo = new AnalyticsRepo(db);
+  const repsRepo = new RepsRepo(db);
+  const accountAssignmentsRepo = new AccountAssignmentsRepo(db);
+  const routingEventsRepo = new RoutingEventsRepo(db);
 
   app.post('/internal/workspaces', async (req, reply) => {
     const parsed = createWorkspaceRequestSchema.safeParse(req.body);
@@ -230,6 +241,139 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.send(stats);
     }
   );
+
+  // KAN-66 — rep management (add/update; no hard delete, see reps.repo.ts).
+  app.post<{ Params: { id: string } }>('/internal/workspaces/:id/reps', async (req, reply) => {
+    const workspace = await workspaceRepo.findById(req.params.id);
+    if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+    const parsed = createRepRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+    }
+    const rep = await repsRepo.create(req.params.id, {
+      name: parsed.data.name,
+      email: parsed.data.email,
+      slackMemberId: parsed.data.slackMemberId ?? null,
+    });
+    return reply.code(201).send(rep);
+  });
+
+  app.get<{ Params: { id: string } }>('/internal/workspaces/:id/reps', async (req, reply) => {
+    const workspace = await workspaceRepo.findById(req.params.id);
+    if (!workspace) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(await repsRepo.list(req.params.id));
+  });
+
+  app.patch<{ Params: { id: string; repId: string } }>(
+    '/internal/workspaces/:id/reps/:repId',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const parsed = updateRepRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+      const rep = await repsRepo.update(req.params.id, req.params.repId, parsed.data);
+      if (!rep) return reply.code(404).send({ error: 'not_found' });
+      return reply.send(rep);
+    }
+  );
+
+  // KAN-66 — CSV account-list upload. Expects columns literally named
+  // `account` (a domain or company name — classified by classifyMatchKey)
+  // and `repEmail` (must match an existing rep's email exactly). Every row
+  // is validated and reported independently — one bad row never rejects
+  // the whole file — and re-uploading upserts existing mappings rather
+  // than duplicating them (UNIQUE(workspace_id, match_key) in the schema).
+  app.post<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/accounts/upload',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const file = await req.file();
+      if (!file) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'no file uploaded' });
+      }
+      const buffer = await file.toBuffer();
+
+      let records: unknown[];
+      try {
+        records = parseCsv(buffer, { columns: true, skip_empty_lines: true, trim: true });
+      } catch (err) {
+        return reply.code(400).send({
+          error: 'invalid_request',
+          details: `CSV could not be parsed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+
+      const results: Array<{
+        row: number;
+        status: 'ok' | 'error';
+        account?: string;
+        error?: string;
+      }> = [];
+
+      for (let i = 0; i < records.length; i++) {
+        const rowNumber = i + 2; // header row is line 1; rows are 1-indexed
+        const parsedRow = accountCsvRowSchema.safeParse(records[i]);
+        if (!parsedRow.success) {
+          results.push({
+            row: rowNumber,
+            status: 'error',
+            error: 'malformed row — expected non-empty "account" and a valid "repEmail" column',
+          });
+          continue;
+        }
+        const { account, repEmail } = parsedRow.data;
+
+        const rep = await repsRepo.findByEmail(req.params.id, repEmail);
+        if (!rep) {
+          results.push({ row: rowNumber, status: 'error', account, error: `unknown rep email: ${repEmail}` });
+          continue;
+        }
+
+        const { matchType, matchKey } = classifyMatchKey(account);
+        await accountAssignmentsRepo.upsert(req.params.id, matchType, matchKey, rep.id);
+        results.push({ row: rowNumber, status: 'ok', account });
+      }
+
+      const successCount = results.filter((r) => r.status === 'ok').length;
+      return reply.send({ successCount, errorCount: results.length - successCount, results });
+    }
+  );
+
+  app.get<{ Params: { id: string } }>('/internal/workspaces/:id/accounts', async (req, reply) => {
+    const workspace = await workspaceRepo.findById(req.params.id);
+    if (!workspace) return reply.code(404).send({ error: 'not_found' });
+    return reply.send(await accountAssignmentsRepo.list(req.params.id));
+  });
+
+  // KAN-69 — routing decision audit log (storage: KAN-66's migration;
+  // writes: KAN-67/68 in gmleads-notification; this route only exposes it).
+  app.get<{
+    Params: { id: string };
+    Querystring: { sessionId?: string; repId?: string; from?: string; to?: string };
+  }>('/internal/workspaces/:id/routing/audit', async (req, reply) => {
+    const workspace = await workspaceRepo.findById(req.params.id);
+    if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+    const from = parseOptionalDate(req.query.from);
+    const to = parseOptionalDate(req.query.to);
+    if (from === null || to === null) {
+      return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+    }
+
+    const events = await routingEventsRepo.list(req.params.id, {
+      sessionId: req.query.sessionId,
+      repId: req.query.repId,
+      from: from ?? undefined,
+      to: to ?? undefined,
+    });
+    return reply.send(events);
+  });
 
   // KAN-99 — auth endpoints (see ADR-013). Called by gmleads-gateway's
   // dashboard-facing /api/auth/* routes, never directly by a client.
