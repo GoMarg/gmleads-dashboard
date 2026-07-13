@@ -10,6 +10,8 @@ import {
   createRepRequestSchema,
   updateRepRequestSchema,
   accountCsvRowSchema,
+  updateDarkFunnelSettingsRequestSchema,
+  updateDigestScheduleRequestSchema,
   classifyMatchKey,
   hashPassword,
   verifyPassword,
@@ -28,6 +30,7 @@ import { AnalyticsRepo } from './db/analytics.repo.js';
 import { RepsRepo } from './db/reps.repo.js';
 import { AccountAssignmentsRepo } from './db/account-assignments.repo.js';
 import { RoutingEventsRepo } from './db/routing-events.repo.js';
+import { buildAnalyticsServices } from './analytics/build-analytics-services.js';
 
 // Query params are always optional ISO strings — undefined means "no bound".
 // Returns undefined for a missing value, null to signal "provided but
@@ -61,6 +64,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const repsRepo = new RepsRepo(db);
   const accountAssignmentsRepo = new AccountAssignmentsRepo(db);
   const routingEventsRepo = new RoutingEventsRepo(db);
+
+  // KAN-74/75/76/77 — Predictive Analytics (Wave 3). See ADR-016.
+  const {
+    accountScoresRepo,
+    darkFunnelRepo,
+    digestDeliveriesRepo,
+    accountScoringService,
+    darkFunnelService,
+  } = buildAnalyticsServices(db, app.log);
 
   app.post('/internal/workspaces', async (req, reply) => {
     const parsed = createWorkspaceRequestSchema.safeParse(req.body);
@@ -374,6 +386,144 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     });
     return reply.send(events);
   });
+
+  // KAN-74 — current (latest per account) scores, highest first.
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/account-scores',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const scores = await accountScoresRepo.listCurrent(req.params.id);
+      return reply.send(scores);
+    }
+  );
+
+  // KAN-74 — score history for one account, oldest first (for trend charts).
+  app.get<{ Params: { id: string; matchKey: string } }>(
+    '/internal/workspaces/:id/analytics/account-scores/:matchKey/history',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const history = await accountScoresRepo.getHistory(
+        req.params.id,
+        decodeURIComponent(req.params.matchKey)
+      );
+      return reply.send(history);
+    }
+  );
+
+  // KAN-74/75 — on-demand recompute (in addition to the nightly scheduled
+  // job — see server.ts), useful for demoing/testing without waiting for
+  // the schedule to fire.
+  app.post<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/recompute',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const [scoredCount, darkFunnelCount] = await Promise.all([
+        accountScoringService.recomputeWorkspace(req.params.id),
+        darkFunnelService.recomputeWorkspace(req.params.id),
+      ]);
+      return reply.send({ scoredCount, darkFunnelCount });
+    }
+  );
+
+  // KAN-75 — current dark-funnel membership list.
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/dark-funnel',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const accounts = await darkFunnelRepo.list(req.params.id);
+      return reply.send(accounts);
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/dark-funnel-settings',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+      return reply.send(workspace.darkFunnelSettings);
+    }
+  );
+
+  // Decision 5 — only visitThresholdCount/windowDays are accepted; page-URL
+  // patterns stay application configuration, not tenant data.
+  app.patch<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/dark-funnel-settings',
+    async (req, reply) => {
+      const parsed = updateDarkFunnelSettingsRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+      const updated = await workspaceRepo.updateDarkFunnelSettings(req.params.id, parsed.data);
+      if (!updated) return reply.code(404).send({ error: 'not_found' });
+      return reply.send(updated.darkFunnelSettings);
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/digest-schedule',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+      return reply.send(workspace.digestSchedule);
+    }
+  );
+
+  app.patch<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/digest-schedule',
+    async (req, reply) => {
+      const parsed = updateDigestScheduleRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+      const updated = await workspaceRepo.updateDigestSchedule(req.params.id, parsed.data);
+      if (!updated) return reply.code(404).send({ error: 'not_found' });
+      return reply.send(updated.digestSchedule);
+    }
+  );
+
+  // KAN-76 — delivery audit trail (also useful for demoing without waiting
+  // a full week for the schedule to fire — see the recompute route above
+  // for the scoring/dark-funnel equivalent; digest sends still only fire
+  // via the schedule check since a send is externally visible in Slack).
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/analytics/digest-log',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+      const deliveries = await digestDeliveriesRepo.list(req.params.id);
+      return reply.send(deliveries);
+    }
+  );
+
+  // KAN-77 — attributed via routing_events.rep_id (Decision 4).
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>(
+    '/internal/workspaces/:id/analytics/rep-performance',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const from = parseOptionalDate(req.query.from);
+      const to = parseOptionalDate(req.query.to);
+      if (from === null || to === null) {
+        return reply.code(400).send({ error: 'invalid_request', details: 'from/to must be valid ISO dates' });
+      }
+
+      const stats = await alertResponsesRepo.getRepPerformanceStats(
+        req.params.id,
+        from ?? undefined,
+        to ?? undefined
+      );
+      return reply.send(stats);
+    }
+  );
 
   // KAN-99 — auth endpoints (see ADR-013). Called by gmleads-gateway's
   // dashboard-facing /api/auth/* routes, never directly by a client.

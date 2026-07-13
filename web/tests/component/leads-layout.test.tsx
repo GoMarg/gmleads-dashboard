@@ -133,6 +133,30 @@ describe('LeadsLayout (auth guard)', () => {
 
     expect(screen.getByRole('link', { name: 'CRM' })).toHaveAttribute('href', '/leads/crm');
   });
+
+  // KAN-74/75/76/77
+  it('links to the predictive analytics routes in the nav', () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'a-valid-token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    renderLayout(<div>protected content</div>);
+
+    expect(screen.getByRole('link', { name: 'Accounts' })).toHaveAttribute('href', '/leads/accounts');
+    expect(screen.getByRole('link', { name: 'Dark funnel' })).toHaveAttribute(
+      'href',
+      '/leads/dark-funnel'
+    );
+    expect(screen.getByRole('link', { name: 'Rep performance' })).toHaveAttribute(
+      'href',
+      '/leads/rep-performance'
+    );
+    expect(screen.getByRole('link', { name: 'Digest' })).toHaveAttribute('href', '/leads/digest');
+  });
 });
 
 describe('LeadsLayout header — widget status indicator (KAN-101)', () => {

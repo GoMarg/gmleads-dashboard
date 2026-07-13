@@ -1,4 +1,4 @@
-import type { IDatabase, AlertResponseAction } from '@gmleads/shared';
+import type { IDatabase, AlertResponseAction, RepPerformanceStats } from '@gmleads/shared';
 
 interface ResponseRow {
   action: AlertResponseAction;
@@ -86,4 +86,67 @@ export class AlertResponsesRepo {
       noResponseCount: Number(row.no_response_count),
     };
   }
+
+  // KAN-77 — Decision 4: attributed via routing_events.rep_id (who a lead
+  // was ASSIGNED to), not via any actor-click identity — no such identity
+  // is captured anywhere in the platform today (see ADR-016). This also
+  // directly satisfies the AC's "account for round-robin volume
+  // differences" — assignedCount is returned alongside the rate/avg
+  // metrics precisely so the UI can show volume for context rather than
+  // ranking by raw counts alone. Date range applies to the routing
+  // decision instant (re.created_at), same convention as getResponseStats'
+  // "alerts from last week" framing, just at the assignment level.
+  async getRepPerformanceStats(
+    workspaceId: string,
+    from: Date | undefined,
+    to: Date | undefined
+  ): Promise<RepPerformanceStats[]> {
+    const res = await this.db.query<RepPerformanceRow>(
+      `WITH assigned AS (
+         SELECT re.rep_id, re.session_id,
+           (SELECT MIN(ad.created_at) FROM alert_deliveries ad
+            WHERE ad.session_id = re.session_id AND ad.success = true) AS delivered_at
+         FROM routing_events re
+         WHERE re.workspace_id = $1 AND re.rep_id IS NOT NULL
+           AND ($2::timestamptz IS NULL OR re.created_at >= $2)
+           AND ($3::timestamptz IS NULL OR re.created_at <= $3)
+       )
+       SELECT
+         r.id AS rep_id,
+         r.name AS rep_name,
+         COUNT(*) AS assigned_count,
+         COUNT(*) FILTER (WHERE ar.created_at IS NOT NULL) AS responded_count,
+         COUNT(*) FILTER (WHERE ar.action = 'booked') AS booked_count,
+         AVG(EXTRACT(EPOCH FROM (ar.created_at - a.delivered_at)) * 1000)
+           FILTER (WHERE a.delivered_at IS NOT NULL AND ar.created_at IS NOT NULL) AS avg_ms,
+         PERCENTILE_CONT(0.5) WITHIN GROUP (
+           ORDER BY EXTRACT(EPOCH FROM (ar.created_at - a.delivered_at)) * 1000
+         ) FILTER (WHERE a.delivered_at IS NOT NULL AND ar.created_at IS NOT NULL) AS median_ms
+       FROM assigned a
+       JOIN reps r ON r.id = a.rep_id
+       LEFT JOIN alert_responses ar ON ar.session_id = a.session_id
+       GROUP BY r.id, r.name
+       ORDER BY assigned_count DESC`,
+      [workspaceId, from ?? null, to ?? null]
+    );
+    return res.rows.map((row) => ({
+      repId: row.rep_id,
+      repName: row.rep_name,
+      assignedCount: Number(row.assigned_count),
+      respondedCount: Number(row.responded_count),
+      bookedCount: Number(row.booked_count),
+      avgResponseMs: row.avg_ms !== null ? Math.round(Number(row.avg_ms)) : null,
+      medianResponseMs: row.median_ms !== null ? Math.round(Number(row.median_ms)) : null,
+    }));
+  }
+}
+
+interface RepPerformanceRow {
+  rep_id: string;
+  rep_name: string;
+  assigned_count: string;
+  responded_count: string;
+  booked_count: string;
+  avg_ms: string | null;
+  median_ms: string | null;
 }
