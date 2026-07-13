@@ -90,4 +90,35 @@ describe('DefaultScoreCalculator', () => {
     expect(score).toBeLessThanOrEqual(100);
     expect(score).toBeGreaterThanOrEqual(0);
   });
+
+  // Explicit determinism guarantee: the same inputs must always produce
+  // the same score/factors — no hidden state, no randomness, no reliance
+  // on wall-clock time. This is what makes a recompute safe to run
+  // repeatedly (nightly, on-demand) without the score drifting on its own.
+  it('is deterministic: identical inputs always produce identical output', () => {
+    const input = {
+      firmographicFitRaw: 30,
+      visitCount: 3,
+      totalChatTurns: 4,
+      highIntentPageVisits: 1,
+    };
+
+    const results = Array.from({ length: 20 }, () => calculator.calculate({ ...input }));
+    const first = results[0];
+    for (const result of results) {
+      expect(result).toEqual(first);
+    }
+  });
+
+  it('is deterministic across separate calculator instances, not just repeated calls', () => {
+    const input = {
+      firmographicFitRaw: 45,
+      visitCount: 5,
+      totalChatTurns: 10,
+      highIntentPageVisits: 4,
+    };
+    const a = new DefaultScoreCalculator().calculate(input);
+    const b = new DefaultScoreCalculator().calculate(input);
+    expect(a).toEqual(b);
+  });
 });

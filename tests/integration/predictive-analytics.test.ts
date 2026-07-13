@@ -145,7 +145,7 @@ describe('account scoring (KAN-74)', () => {
     expect(scores[0].factors.intentSignals).toBeGreaterThan(0); // one pricing-page visit
   });
 
-  it('accumulates history across multiple recomputes, oldest first', async () => {
+  it('accumulates history across multiple recomputes, oldest first, with a deterministic score for unchanged data', async () => {
     const ws = await createTestWorkspace(db);
     await createTestSession(ws.id, { firmographics: { domain: 'acme.com' } });
 
@@ -160,6 +160,12 @@ describe('account scoring (KAN-74)', () => {
     expect(new Date(res.json()[0].computedAt).getTime()).toBeLessThanOrEqual(
       new Date(res.json()[1].computedAt).getTime()
     );
+    // Determinism: recomputing over the exact same underlying session data
+    // must produce the exact same score and factor breakdown both times —
+    // two distinct rows (append-only), but identical values.
+    expect(res.json()[0].score).toBe(res.json()[1].score);
+    expect(res.json()[0].factors).toEqual(res.json()[1].factors);
+    expect(res.json()[0].algorithmVersion).toBe(res.json()[1].algorithmVersion);
   });
 
   it('skips sessions with no domain or company name (unmatchable)', async () => {
@@ -366,18 +372,41 @@ describe('weekly digest (KAN-76)', () => {
     expect(logRes.json()[0].channel).toBe('slack');
   });
 
-  it('does not resend within the minimum days-between-sends window', async () => {
+  it('is idempotent: calling sendIfDue twice for the same period never double-sends (DB-enforced)', async () => {
     const ws = await createTestWorkspace(db, { slackWebhookUrl: 'https://hooks.slack.com/services/test' });
     const services = buildAnalyticsServices(db, app.log);
-    const matchingTime = new Date(Date.UTC(2026, 0, 5, 8, 0, 0));
+    const matchingTime = new Date(Date.UTC(2026, 0, 5, 8, 0, 0)); // Monday 08:00 UTC
 
-    await services.digestService.sendIfDue(ws.id, matchingTime);
+    const first = await services.digestService.sendIfDue(ws.id, matchingTime);
+    expect(first).toBe(true);
     expect(sendAlertMock).toHaveBeenCalledTimes(1);
 
-    const nextWeekSameSlotButTooSoon = new Date(matchingTime.getTime() + 2 * 24 * 60 * 60 * 1000);
-    const sentAgain = await services.digestService.sendIfDue(ws.id, nextWeekSameSlotButTooSoon);
-    expect(sentAgain).toBe(false);
+    // Simulates an overlapping cron tick or a restart re-evaluating the
+    // exact same hour — must be a no-op, guaranteed by
+    // UNIQUE(workspace_id, period_key), not merely a time-window heuristic.
+    const second = await services.digestService.sendIfDue(ws.id, matchingTime);
+    expect(second).toBe(false);
     expect(sendAlertMock).toHaveBeenCalledTimes(1);
+
+    const logRes = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/analytics/digest-log`,
+    });
+    expect(logRes.json()).toHaveLength(1); // never two rows for the same period
+  });
+
+  it('sends again once a new ISO week begins, even close together', async () => {
+    const ws = await createTestWorkspace(db, { slackWebhookUrl: 'https://hooks.slack.com/services/test' });
+    const services = buildAnalyticsServices(db, app.log);
+
+    const week1 = new Date(Date.UTC(2026, 0, 5, 8, 0, 0)); // Monday, ISO week 2
+    const week2 = new Date(Date.UTC(2026, 0, 12, 8, 0, 0)); // next Monday, ISO week 3
+
+    const first = await services.digestService.sendIfDue(ws.id, week1);
+    const second = await services.digestService.sendIfDue(ws.id, week2);
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+    expect(sendAlertMock).toHaveBeenCalledTimes(2);
   });
 
   it('skips sending when no slack webhook is configured', async () => {
@@ -404,5 +433,105 @@ describe('weekly digest (KAN-76)', () => {
       payload: { dayOfWeek: 3, hourUtc: 14 },
     });
     expect(patchRes.json()).toEqual({ dayOfWeek: 3, hourUtc: 14 });
+  });
+});
+
+describe('workspace isolation across every analytics endpoint', () => {
+  it('account-scores never leaks another workspace\'s scores, even with a colliding match_key', async () => {
+    const wsA = await createTestWorkspace(db);
+    const wsB = await createTestWorkspace(db);
+    // Same domain at both workspaces on purpose — this is exactly the case
+    // where a missing workspace_id filter would leak data across tenants.
+    await createTestSession(wsA.id, { firmographics: { domain: 'shared-client.com' } });
+    await createTestSession(wsB.id, { firmographics: { domain: 'shared-client.com' } });
+
+    await app.inject({ method: 'POST', url: `/internal/workspaces/${wsA.id}/analytics/recompute` });
+    await app.inject({ method: 'POST', url: `/internal/workspaces/${wsB.id}/analytics/recompute` });
+
+    const scoresA = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsA.id}/analytics/account-scores`,
+    });
+    const scoresB = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsB.id}/analytics/account-scores`,
+    });
+    expect(scoresA.json()).toHaveLength(1);
+    expect(scoresB.json()).toHaveLength(1);
+    expect(scoresA.json()[0].workspaceId).toBe(wsA.id);
+    expect(scoresB.json()[0].workspaceId).toBe(wsB.id);
+
+    const historyA = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsA.id}/analytics/account-scores/shared-client.com/history`,
+    });
+    expect(historyA.json()).toHaveLength(1);
+    expect(historyA.json()[0].workspaceId).toBe(wsA.id);
+  });
+
+  it('dark-funnel list never leaks another workspace\'s accounts', async () => {
+    const wsA = await createTestWorkspace(db);
+    const wsB = await createTestWorkspace(db);
+    for (let i = 0; i < 3; i++) {
+      await createTestSession(wsA.id, { firmographics: { domain: 'shared-client.com' } });
+    }
+    // wsB never qualifies (only 1 visit) — proves wsA's recompute can't
+    // accidentally create or leak a row under wsB.
+    await createTestSession(wsB.id, { firmographics: { domain: 'shared-client.com' } });
+
+    await app.inject({ method: 'POST', url: `/internal/workspaces/${wsA.id}/analytics/recompute` });
+    await app.inject({ method: 'POST', url: `/internal/workspaces/${wsB.id}/analytics/recompute` });
+
+    const darkFunnelA = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsA.id}/analytics/dark-funnel`,
+    });
+    const darkFunnelB = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsB.id}/analytics/dark-funnel`,
+    });
+    expect(darkFunnelA.json()).toHaveLength(1);
+    expect(darkFunnelA.json()[0].workspaceId).toBe(wsA.id);
+    expect(darkFunnelB.json()).toHaveLength(0);
+  });
+
+  it('rep-performance never leaks another workspace\'s reps or routing events', async () => {
+    const wsA = await createTestWorkspace(db);
+    const wsB = await createTestWorkspace(db);
+    const repA = await createTestRep(wsA.id, 'Jamie');
+    const repB = await createTestRep(wsB.id, 'Jamie'); // same name, different workspace/rep id
+
+    const sessionA = await createTestSession(wsA.id);
+    await recordRoutingEvent(wsA.id, sessionA, repA);
+    const sessionB = await createTestSession(wsB.id);
+    await recordRoutingEvent(wsB.id, sessionB, repB);
+
+    const statsA = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsA.id}/analytics/rep-performance`,
+    });
+    expect(statsA.json()).toHaveLength(1);
+    expect(statsA.json()[0].repId).toBe(repA);
+    expect(statsA.json()[0].repId).not.toBe(repB);
+  });
+
+  it('digest-log never leaks another workspace\'s deliveries', async () => {
+    const wsA = await createTestWorkspace(db, { slackWebhookUrl: 'https://hooks.slack.com/services/a' });
+    const wsB = await createTestWorkspace(db, { slackWebhookUrl: 'https://hooks.slack.com/services/b' });
+    const services = buildAnalyticsServices(db, app.log);
+    const matchingTime = new Date(Date.UTC(2026, 0, 5, 8, 0, 0));
+
+    await services.digestService.sendIfDue(wsA.id, matchingTime);
+
+    const logA = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsA.id}/analytics/digest-log`,
+    });
+    const logB = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${wsB.id}/analytics/digest-log`,
+    });
+    expect(logA.json()).toHaveLength(1);
+    expect(logB.json()).toHaveLength(0);
   });
 });
