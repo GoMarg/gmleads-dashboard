@@ -23,6 +23,8 @@ import type {
   DigestSchedule,
   DigestDeliveryDto,
   RepPerformanceStats,
+  SlackStatus,
+  SlackChannelDto,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -264,6 +266,63 @@ export function useCrmActivityLogQuery(workspaceId: string | null) {
     queryKey: ['crm-activity-log', workspaceId],
     queryFn: () => authFetch<CrmActivityPushDto[]>(`/api/workspaces/${workspaceId}/crm/activity-log`),
     enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-48 — Slack OAuth. Additive alongside the legacy pasted-webhook setup
+// (see ADR-018) — none of these paths mention a provider name, mirroring
+// the CRM integration's provider-neutral route shape above.
+
+export function useSlackStatusQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['slack-status', workspaceId],
+    queryFn: () => authFetch<SlackStatus>(`/api/workspaces/${workspaceId}/slack/status`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// Returns the authorizationUrl for the caller to navigate the browser to
+// (window.location.href = ...) — same OAuth-redirect shape as the CRM
+// connect mutation above, not something React Query renders the result of.
+export function useSlackConnectMutation(workspaceId: string | null) {
+  return useMutation({
+    mutationFn: () =>
+      authFetch<{ authorizationUrl: string }>(`/api/workspaces/${workspaceId}/slack/connect`, {
+        method: 'POST',
+      }),
+  });
+}
+
+// Only fetched once a connection exists (see SlackConnectPanel) — listing
+// channels for a workspace with no Slack connection 409s.
+export function useSlackChannelsQuery(workspaceId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['slack-channels', workspaceId],
+    queryFn: () => authFetch<SlackChannelDto[]>(`/api/workspaces/${workspaceId}/slack/channels`),
+    enabled: Boolean(workspaceId) && enabled,
+  });
+}
+
+export function useSetSlackChannelMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { channelId: string; channelName: string }) =>
+      authFetch<{ defaultChannelId: string; defaultChannelName: string }>(
+        `/api/workspaces/${workspaceId}/slack/channel`,
+        { method: 'PUT', body: JSON.stringify(input) }
+      ),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['slack-status', workspaceId] }),
+  });
+}
+
+export function useSlackDisconnectMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      authFetch<{ success: boolean }>(`/api/workspaces/${workspaceId}/slack/disconnect`, {
+        method: 'POST',
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['slack-status', workspaceId] }),
   });
 }
 

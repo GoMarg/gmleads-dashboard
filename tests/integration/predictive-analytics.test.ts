@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
-import type { INotification } from '@gmleads/shared';
+import type { INotification, NotificationTarget } from '@gmleads/shared';
 
 // KAN-76: getNotification() wraps a real Slack webhook POST — mock it
 // directly (same pattern as gmleads-notification's notification-flow.test.ts)
 // rather than trying to intercept axios through the @gmleads/shared
 // package boundary.
-const sendAlertMock = vi.fn<(url: string, payload: unknown) => Promise<void>>();
-const fakeNotification: INotification = { sendAlert: sendAlertMock };
+const sendMessageMock =
+  vi.fn<(target: NotificationTarget, payload: unknown) => Promise<void>>();
+const fakeNotification: INotification = { sendMessage: sendMessageMock };
 
 vi.mock('@gmleads/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@gmleads/shared')>();
@@ -29,8 +30,8 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await resetDatabase(db);
-  sendAlertMock.mockClear();
-  sendAlertMock.mockResolvedValue(undefined);
+  sendMessageMock.mockClear();
+  sendMessageMock.mockResolvedValue(undefined);
 });
 
 afterAll(async () => {
@@ -353,14 +354,14 @@ describe('weekly digest (KAN-76)', () => {
     const notMatchingTime = new Date(Date.UTC(2026, 0, 6, 9, 0, 0)); // Tuesday 09:00 UTC
     const sentWrongSlot = await services.digestService.sendIfDue(ws.id, notMatchingTime);
     expect(sentWrongSlot).toBe(false);
-    expect(sendAlertMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
 
     const matchingTime = new Date(Date.UTC(2026, 0, 5, 8, 0, 0)); // Monday 08:00 UTC
     const sent = await services.digestService.sendIfDue(ws.id, matchingTime);
     expect(sent).toBe(true);
-    expect(sendAlertMock).toHaveBeenCalledTimes(1);
-    expect(sendAlertMock).toHaveBeenCalledWith(
-      'https://hooks.slack.com/services/test',
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledWith(
+      { kind: 'webhook', webhookUrl: 'https://hooks.slack.com/services/test' },
       expect.objectContaining({ text: expect.stringContaining('Acme Corp') })
     );
 
@@ -379,14 +380,14 @@ describe('weekly digest (KAN-76)', () => {
 
     const first = await services.digestService.sendIfDue(ws.id, matchingTime);
     expect(first).toBe(true);
-    expect(sendAlertMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
 
     // Simulates an overlapping cron tick or a restart re-evaluating the
     // exact same hour — must be a no-op, guaranteed by
     // UNIQUE(workspace_id, period_key), not merely a time-window heuristic.
     const second = await services.digestService.sendIfDue(ws.id, matchingTime);
     expect(second).toBe(false);
-    expect(sendAlertMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
 
     const logRes = await app.inject({
       method: 'GET',
@@ -406,7 +407,7 @@ describe('weekly digest (KAN-76)', () => {
     const second = await services.digestService.sendIfDue(ws.id, week2);
     expect(first).toBe(true);
     expect(second).toBe(true);
-    expect(sendAlertMock).toHaveBeenCalledTimes(2);
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
   });
 
   it('skips sending when no slack webhook is configured', async () => {
@@ -416,7 +417,7 @@ describe('weekly digest (KAN-76)', () => {
 
     const sent = await services.digestService.sendIfDue(ws.id, matchingTime);
     expect(sent).toBe(false);
-    expect(sendAlertMock).not.toHaveBeenCalled();
+    expect(sendMessageMock).not.toHaveBeenCalled();
   });
 
   it('gets and updates the digest schedule', async () => {
