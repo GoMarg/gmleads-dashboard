@@ -71,6 +71,14 @@ export interface SlackStatus {
 
 export type SlackChannelDto = SlackChannel;
 
+// KAN-65 — detection only. This is the full shape of what this ticket
+// exposes; no routing/assignment/booking fields belong here.
+export interface RepPresenceDto {
+  repId: string;
+  name: string;
+  status: 'active' | 'away' | 'unknown';
+}
+
 // KAN-59: every Lead is a Session enriched with response-time data — see
 // gmleads-dashboard's leads.repo.ts, which always joins the two so this
 // list and the session replay page can never disagree.

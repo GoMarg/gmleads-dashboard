@@ -31,6 +31,9 @@ const REPS = [
 ];
 
 function routeFetch(url: string): Response {
+  // Checked before the generic '/reps' match below — '/reps/presence'
+  // contains '/reps' as a substring.
+  if (url.includes('/reps/presence')) return jsonResponse(200, []);
   if (url.includes('/reps')) return jsonResponse(200, REPS);
   if (url.includes('/accounts')) {
     return jsonResponse(200, [
@@ -151,5 +154,30 @@ describe('RoutingPage', () => {
 
     expect(await screen.findByText('1 mapped, 1 error.')).toBeInTheDocument();
     expect(await screen.findByText('unknown rep email: ghost@acme.test')).toBeInTheDocument();
+  });
+
+  it('shows the Slack presence status per rep (KAN-65, detection only)', async () => {
+    const fetchSpy = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reps/presence')) {
+        return Promise.resolve(jsonResponse(200, [{ repId: 'rep-1', name: 'Jamie', status: 'away' }]));
+      }
+      return Promise.resolve(routeFetch(url));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    await screen.findByText('jamie@acme.test');
+    expect(await screen.findByText('Away')).toBeInTheDocument();
+  });
+
+  it('shows — for a rep with unknown presence (no Slack connection or no slack member id)', async () => {
+    const fetchSpy = vi.fn().mockImplementation((url: string) => Promise.resolve(routeFetch(url)));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    await screen.findByText('jamie@acme.test');
+    expect(await screen.findByText('—')).toBeInTheDocument();
   });
 });
