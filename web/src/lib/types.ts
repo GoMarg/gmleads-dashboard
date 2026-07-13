@@ -19,6 +19,7 @@ import type {
   DigestSchedule,
   DigestDelivery,
   RepPerformanceStats,
+  SlackChannel,
 } from '@gmleads/shared';
 
 export type { SessionStatus, AlertResponseAction };
@@ -57,6 +58,18 @@ export interface CrmStatus {
 export type CrmFieldMappingDto = CrmFieldMapping;
 
 export type CrmActivityPushDto = Omit<CrmActivityPush, 'createdAt'> & { createdAt: string };
+
+// KAN-48 — Slack OAuth. Additive alongside the legacy pasted-webhook setup
+// (see ADR-018) — this only ever reflects the real OAuth bot-token
+// connection, not whether a workspace has a webhook configured.
+export interface SlackStatus {
+  connected: boolean;
+  teamName?: string | null;
+  defaultChannelName?: string | null;
+  connectedAt?: string;
+}
+
+export type SlackChannelDto = SlackChannel;
 
 // KAN-59: every Lead is a Session enriched with response-time data — see
 // gmleads-dashboard's leads.repo.ts, which always joins the two so this

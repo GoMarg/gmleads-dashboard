@@ -89,7 +89,10 @@ export class DigestService {
       topScores,
       newDarkFunnelAccounts,
     });
-    await getNotification().sendAlert(workspace.slackWebhookUrl, payload);
+    await getNotification().sendMessage(
+      { kind: 'webhook', webhookUrl: workspace.slackWebhookUrl },
+      payload
+    );
 
     this.log.info({ workspaceId }, 'weekly digest sent');
     return true;

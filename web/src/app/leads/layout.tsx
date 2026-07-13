@@ -13,7 +13,8 @@ import { WidgetStatusIndicator } from '@/components/widget-status-indicator';
 // /leads/funnel route, KAN-101 (widget install-verification) adds a
 // compact header indicator, KAN-66/67/68/69 (Lead Routing) attaches a
 // nested /leads/routing route, KAN-71/72/73 (CRM Integration) attaches a
-// nested /leads/crm route, and KAN-74/75/76/77 (Predictive Analytics)
+// nested /leads/crm route, KAN-48 (Slack OAuth) attaches a nested
+// /leads/slack route, and KAN-74/75/76/77 (Predictive Analytics)
 // attach /leads/accounts, /leads/dark-funnel, /leads/rep-performance, and
 // /leads/digest — all without reworking this layout — see
 // PROJECT_STATUS_JULY_2026.md's wave sequencing. KAN-60 (usage/quota)
@@ -50,6 +51,7 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
           <Link href="/leads/funnel">Funnel</Link>
           <Link href="/leads/routing">Routing</Link>
           <Link href="/leads/crm">CRM</Link>
+          <Link href="/leads/slack">Slack</Link>
           <Link href="/leads/accounts">Accounts</Link>
           <Link href="/leads/dark-funnel">Dark funnel</Link>
           <Link href="/leads/rep-performance">Rep performance</Link>
