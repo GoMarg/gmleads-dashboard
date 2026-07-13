@@ -13,6 +13,12 @@ import type {
   CrmProvider,
   CrmFieldMapping,
   CrmActivityPush,
+  AccountScore,
+  DarkFunnelAccount,
+  DarkFunnelSettings,
+  DigestSchedule,
+  DigestDelivery,
+  RepPerformanceStats,
 } from '@gmleads/shared';
 
 export type { SessionStatus, AlertResponseAction };
@@ -127,3 +133,13 @@ export interface RespondResponse {
 export interface WidgetStatus {
   lastSeenAt: string | null;
 }
+
+// KAN-74/75/76/77 — Predictive Analytics (Wave 3). See ADR-016.
+export type AccountScoreDto = Omit<AccountScore, 'computedAt'> & { computedAt: string };
+export type DarkFunnelAccountDto = Omit<DarkFunnelAccount, 'firstQualifiedAt' | 'lastActivityAt'> & {
+  firstQualifiedAt: string;
+  lastActivityAt: string;
+};
+export type { DarkFunnelSettings, DigestSchedule };
+export type DigestDeliveryDto = Omit<DigestDelivery, 'sentAt'> & { sentAt: string };
+export type { RepPerformanceStats };

@@ -1,5 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import type { IDatabase, Workspace, IcpDefinition, FeatureFlags } from '@gmleads/shared';
+import type {
+  IDatabase,
+  Workspace,
+  IcpDefinition,
+  FeatureFlags,
+  DarkFunnelSettings,
+  DigestSchedule,
+} from '@gmleads/shared';
 
 interface WorkspaceRow {
   id: string;
@@ -11,6 +18,8 @@ interface WorkspaceRow {
   feature_flags: Partial<FeatureFlags>;
   alert_claim_timeout_mins: number;
   created_at: Date;
+  dark_funnel_settings: DarkFunnelSettings;
+  digest_schedule: DigestSchedule;
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
@@ -24,6 +33,8 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     featureFlags: row.feature_flags,
     alertClaimTimeoutMins: row.alert_claim_timeout_mins,
     createdAt: row.created_at,
+    darkFunnelSettings: row.dark_funnel_settings,
+    digestSchedule: row.digest_schedule,
   };
 }
 
@@ -65,6 +76,32 @@ export class WorkspaceRepo {
 
   async findById(id: string): Promise<Workspace | null> {
     const res = await this.db.query<WorkspaceRow>('SELECT * FROM workspaces WHERE id = $1', [id]);
+    return res.rows[0] ? toWorkspace(res.rows[0]) : null;
+  }
+
+  // KAN-74/76: the nightly scoring job and the hourly digest-schedule check
+  // both need to iterate every workspace, not one at a time by id.
+  async findAll(): Promise<Workspace[]> {
+    const res = await this.db.query<WorkspaceRow>('SELECT * FROM workspaces');
+    return res.rows.map(toWorkspace);
+  }
+
+  async updateDarkFunnelSettings(
+    id: string,
+    settings: DarkFunnelSettings
+  ): Promise<Workspace | null> {
+    const res = await this.db.query<WorkspaceRow>(
+      `UPDATE workspaces SET dark_funnel_settings = $2 WHERE id = $1 RETURNING *`,
+      [id, settings]
+    );
+    return res.rows[0] ? toWorkspace(res.rows[0]) : null;
+  }
+
+  async updateDigestSchedule(id: string, schedule: DigestSchedule): Promise<Workspace | null> {
+    const res = await this.db.query<WorkspaceRow>(
+      `UPDATE workspaces SET digest_schedule = $2 WHERE id = $1 RETURNING *`,
+      [id, schedule]
+    );
     return res.rows[0] ? toWorkspace(res.rows[0]) : null;
   }
 }

@@ -17,6 +17,12 @@ import type {
   CrmStatus,
   CrmFieldMappingDto,
   CrmActivityPushDto,
+  AccountScoreDto,
+  DarkFunnelAccountDto,
+  DarkFunnelSettings,
+  DigestSchedule,
+  DigestDeliveryDto,
+  RepPerformanceStats,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -258,5 +264,111 @@ export function useCrmActivityLogQuery(workspaceId: string | null) {
     queryKey: ['crm-activity-log', workspaceId],
     queryFn: () => authFetch<CrmActivityPushDto[]>(`/api/workspaces/${workspaceId}/crm/activity-log`),
     enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-74/75/76/77 — Predictive Analytics (Wave 3). See ADR-016.
+
+export function useAccountScoresQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['account-scores', workspaceId],
+    queryFn: () => authFetch<AccountScoreDto[]>(`/api/workspaces/${workspaceId}/analytics/account-scores`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useAccountScoreHistoryQuery(workspaceId: string | null, matchKey: string | null) {
+  return useQuery({
+    queryKey: ['account-score-history', workspaceId, matchKey],
+    queryFn: () =>
+      authFetch<AccountScoreDto[]>(
+        `/api/workspaces/${workspaceId}/analytics/account-scores/${encodeURIComponent(matchKey!)}/history`
+      ),
+    enabled: Boolean(workspaceId) && Boolean(matchKey),
+  });
+}
+
+// Manual recompute — invalidates both scores and dark-funnel, since a
+// single recompute route (KAN-74's AccountScoringService + KAN-75's
+// DarkFunnelService) updates both.
+export function useRecomputeAnalyticsMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      authFetch<{ scoredCount: number; darkFunnelCount: number }>(
+        `/api/workspaces/${workspaceId}/analytics/recompute`,
+        { method: 'POST' }
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['account-scores', workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ['dark-funnel', workspaceId] });
+    },
+  });
+}
+
+export function useDarkFunnelQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['dark-funnel', workspaceId],
+    queryFn: () => authFetch<DarkFunnelAccountDto[]>(`/api/workspaces/${workspaceId}/analytics/dark-funnel`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useDarkFunnelSettingsQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['dark-funnel-settings', workspaceId],
+    queryFn: () =>
+      authFetch<DarkFunnelSettings>(`/api/workspaces/${workspaceId}/analytics/dark-funnel-settings`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useUpdateDarkFunnelSettingsMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: DarkFunnelSettings) =>
+      authFetch<DarkFunnelSettings>(`/api/workspaces/${workspaceId}/analytics/dark-funnel-settings`, {
+        method: 'PATCH',
+        body: JSON.stringify(settings),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ['dark-funnel-settings', workspaceId] }),
+  });
+}
+
+export function useRepPerformanceQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['rep-performance', workspaceId],
+    queryFn: () =>
+      authFetch<RepPerformanceStats[]>(`/api/workspaces/${workspaceId}/analytics/rep-performance`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useDigestLogQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['digest-log', workspaceId],
+    queryFn: () => authFetch<DigestDeliveryDto[]>(`/api/workspaces/${workspaceId}/analytics/digest-log`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useDigestScheduleQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['digest-schedule', workspaceId],
+    queryFn: () => authFetch<DigestSchedule>(`/api/workspaces/${workspaceId}/analytics/digest-schedule`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useUpdateDigestScheduleMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (schedule: DigestSchedule) =>
+      authFetch<DigestSchedule>(`/api/workspaces/${workspaceId}/analytics/digest-schedule`, {
+        method: 'PATCH',
+        body: JSON.stringify(schedule),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['digest-schedule', workspaceId] }),
   });
 }
