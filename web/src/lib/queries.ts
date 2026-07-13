@@ -25,6 +25,7 @@ import type {
   RepPerformanceStats,
   SlackStatus,
   SlackChannelDto,
+  RepPresenceDto,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -184,6 +185,16 @@ export function useUpdateRepMutation(workspaceId: string | null) {
         body: JSON.stringify({ active }),
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['reps', workspaceId] }),
+  });
+}
+
+// KAN-65 — detection only, read-only. No mutation exists here on purpose:
+// this signal isn't editable, it's observed from Slack.
+export function useRepsPresenceQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['reps-presence', workspaceId],
+    queryFn: () => authFetch<RepPresenceDto[]>(`/api/workspaces/${workspaceId}/reps/presence`),
+    enabled: Boolean(workspaceId),
   });
 }
 

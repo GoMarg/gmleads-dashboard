@@ -1,7 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { useRepsQuery, useCreateRepMutation, useUpdateRepMutation } from '@/lib/queries';
+import {
+  useRepsQuery,
+  useCreateRepMutation,
+  useUpdateRepMutation,
+  useRepsPresenceQuery,
+} from '@/lib/queries';
+
+// KAN-65 — detection only. Purely a display label for the Slack presence
+// signal; does not feed into routing/assignment/booking anywhere.
+const PRESENCE_LABELS: Record<'active' | 'away' | 'unknown', string> = {
+  active: 'Active',
+  away: 'Away',
+  unknown: '—',
+};
 
 // KAN-66: rep management — add a rep (name, email, optional Slack member
 // ID so direct routing can @mention them without Slack OAuth) and toggle
@@ -11,6 +24,8 @@ export function RepsPanel({ workspaceId }: { workspaceId: string | null }): Reac
   const { data: reps, isLoading } = useRepsQuery(workspaceId);
   const createRep = useCreateRepMutation(workspaceId);
   const updateRep = useUpdateRepMutation(workspaceId);
+  const { data: presence } = useRepsPresenceQuery(workspaceId);
+  const presenceByRepId = new Map((presence ?? []).map((p) => [p.repId, p.status]));
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -86,6 +101,7 @@ export function RepsPanel({ workspaceId }: { workspaceId: string | null }): Reac
               <th className="py-1">Email</th>
               <th className="py-1">Slack ID</th>
               <th className="py-1">Status</th>
+              <th className="py-1">Slack presence</th>
               <th className="py-1" />
             </tr>
           </thead>
@@ -96,6 +112,7 @@ export function RepsPanel({ workspaceId }: { workspaceId: string | null }): Reac
                 <td className="py-1">{rep.email}</td>
                 <td className="py-1">{rep.slackMemberId ?? '—'}</td>
                 <td className="py-1">{rep.active ? 'Active' : 'Inactive'}</td>
+                <td className="py-1">{PRESENCE_LABELS[presenceByRepId.get(rep.id) ?? 'unknown']}</td>
                 <td className="py-1">
                   <button
                     type="button"
