@@ -14,6 +14,9 @@ import type {
   AccountAssignmentDto,
   RoutingEventDto,
   CsvUploadResult,
+  CrmStatus,
+  CrmFieldMappingDto,
+  CrmActivityPushDto,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -201,6 +204,59 @@ export function useRoutingAuditQuery(workspaceId: string | null) {
   return useQuery({
     queryKey: ['routing-audit', workspaceId],
     queryFn: () => authFetch<RoutingEventDto[]>(`/api/workspaces/${workspaceId}/routing/audit`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-71/72/73 — CRM Integration. No provider name in any of these
+// paths — provider-neutral by design, matching the backend routes.
+
+export function useCrmStatusQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['crm-status', workspaceId],
+    queryFn: () => authFetch<CrmStatus>(`/api/workspaces/${workspaceId}/crm/status`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// Returns the authorizationUrl for the caller to navigate the browser to
+// (window.location.href = ...) — this is a real OAuth redirect, not
+// something React Query can render the result of.
+export function useCrmConnectMutation(workspaceId: string | null) {
+  return useMutation({
+    mutationFn: () =>
+      authFetch<{ authorizationUrl: string }>(`/api/workspaces/${workspaceId}/crm/connect`, {
+        method: 'POST',
+      }),
+  });
+}
+
+export function useCrmMappingsQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['crm-mappings', workspaceId],
+    queryFn: () => authFetch<CrmFieldMappingDto[]>(`/api/workspaces/${workspaceId}/crm/mappings`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useUpsertCrmMappingsMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      mappings: Array<{ gmleadsField: string; crmProperty: string; objectType: 'contact' | 'company' }>
+    ) =>
+      authFetch<CrmFieldMappingDto[]>(`/api/workspaces/${workspaceId}/crm/mappings`, {
+        method: 'PUT',
+        body: JSON.stringify(mappings),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['crm-mappings', workspaceId] }),
+  });
+}
+
+export function useCrmActivityLogQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['crm-activity-log', workspaceId],
+    queryFn: () => authFetch<CrmActivityPushDto[]>(`/api/workspaces/${workspaceId}/crm/activity-log`),
     enabled: Boolean(workspaceId),
   });
 }

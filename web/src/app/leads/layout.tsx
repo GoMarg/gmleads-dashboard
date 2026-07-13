@@ -11,10 +11,11 @@ import { WidgetStatusIndicator } from '@/components/widget-status-indicator';
 // response time) attached to the existing /leads page, KAN-58 (funnel +
 // delivery-latency/success-rate analytics) attaches here as a nested
 // /leads/funnel route, KAN-101 (widget install-verification) adds a
-// compact header indicator, and KAN-66/67/68/69 (Lead Routing) attaches a
-// nested /leads/routing route — all without reworking this layout — see
-// PROJECT_STATUS_JULY_2026.md's Wave 2 sequencing. KAN-60 (usage/quota)
-// still has room to attach the same way.
+// compact header indicator, KAN-66/67/68/69 (Lead Routing) attaches a
+// nested /leads/routing route, and KAN-71/72/73 (CRM Integration)
+// attaches a nested /leads/crm route — all without reworking this
+// layout — see PROJECT_STATUS_JULY_2026.md's Wave 2 sequencing. KAN-60
+// (usage/quota) still has room to attach the same way.
 export default function LeadsLayout({ children }: { children: React.ReactNode }): React.ReactElement | null {
   const { accessToken, workspaceId, isInitializing, logout } = useAuth();
   const router = useRouter();
@@ -46,6 +47,7 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
           <Link href="/leads">Leads</Link>
           <Link href="/leads/funnel">Funnel</Link>
           <Link href="/leads/routing">Routing</Link>
+          <Link href="/leads/crm">CRM</Link>
         </nav>
         <div className="flex items-center gap-4">
           <WidgetStatusIndicator workspaceId={workspaceId} />

@@ -10,6 +10,9 @@ import type {
   Rep,
   AccountAssignment,
   RoutingEvent,
+  CrmProvider,
+  CrmFieldMapping,
+  CrmActivityPush,
 } from '@gmleads/shared';
 
 export type { SessionStatus, AlertResponseAction };
@@ -34,6 +37,20 @@ export interface CsvUploadResult {
   errorCount: number;
   results: CsvUploadResultRow[];
 }
+
+// KAN-71/72/73 — CRM Integration. Provider-neutral: CrmStatus['provider']
+// is whatever the connected provider actually is, not assumed to be
+// 'hubspot' — the UI reads it rather than hardcoding a label.
+export interface CrmStatus {
+  connected: boolean;
+  provider?: CrmProvider;
+  externalAccountId?: string;
+  connectedAt?: string;
+}
+
+export type CrmFieldMappingDto = CrmFieldMapping;
+
+export type CrmActivityPushDto = Omit<CrmActivityPush, 'createdAt'> & { createdAt: string };
 
 // KAN-59: every Lead is a Session enriched with response-time data — see
 // gmleads-dashboard's leads.repo.ts, which always joins the two so this

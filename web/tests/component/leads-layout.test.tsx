@@ -118,6 +118,21 @@ describe('LeadsLayout (auth guard)', () => {
 
     expect(screen.getByRole('link', { name: 'Routing' })).toHaveAttribute('href', '/leads/routing');
   });
+
+  // KAN-71/72/73
+  it('links to /leads/crm in the nav', () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'a-valid-token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    renderLayout(<div>protected content</div>);
+
+    expect(screen.getByRole('link', { name: 'CRM' })).toHaveAttribute('href', '/leads/crm');
+  });
 });
 
 describe('LeadsLayout header — widget status indicator (KAN-101)', () => {
