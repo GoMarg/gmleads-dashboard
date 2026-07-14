@@ -180,4 +180,46 @@ describe('RoutingPage', () => {
     await screen.findByText('jamie@acme.test');
     expect(await screen.findByText('—')).toBeInTheDocument();
   });
+
+  it('loads the routing page successfully even when the presence endpoint itself fails (e.g. a disconnected Slack workspace)', async () => {
+    const fetchSpy = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reps/presence')) return Promise.resolve(jsonResponse(500, { error: 'internal' }));
+      return Promise.resolve(routeFetch(url));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    // The page itself (reps table, accounts, audit log) must render fully
+    // regardless — presence is a purely additive signal, never a
+    // precondition for the rest of the page.
+    expect(await screen.findByText('jamie@acme.test')).toBeInTheDocument();
+    expect(await screen.findByText('Account list (1 mapped)')).toBeInTheDocument();
+    expect(await screen.findByText('—')).toBeInTheDocument(); // falls back to unknown, not an error state
+  });
+
+  it('renders the reps table without waiting for a slow presence fetch (non-blocking)', async () => {
+    let resolvePresence!: (res: Response) => void;
+    const presencePromise = new Promise<Response>((resolve) => {
+      resolvePresence = resolve;
+    });
+    const fetchSpy = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reps/presence')) return presencePromise;
+      return Promise.resolve(routeFetch(url));
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    // Reps table appears while the presence fetch is still pending. Uses
+    // 'away' (not 'active') deliberately — the pre-existing rep Status
+    // column already renders the literal text "Active" for any active
+    // rep, unrelated to Slack presence, so asserting presence absence via
+    // that string would be a false positive.
+    expect(await screen.findByText('jamie@acme.test')).toBeInTheDocument();
+    expect(screen.queryByText('Away')).not.toBeInTheDocument();
+
+    resolvePresence(jsonResponse(200, [{ repId: 'rep-1', name: 'Jamie', status: 'away' }]));
+    expect(await screen.findByText('Away')).toBeInTheDocument();
+  });
 });
