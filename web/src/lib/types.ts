@@ -20,6 +20,7 @@ import type {
   DigestDelivery,
   RepPerformanceStats,
   SlackChannel,
+  BusinessHours,
 } from '@gmleads/shared';
 
 export type { SessionStatus, AlertResponseAction };
@@ -164,3 +165,10 @@ export type DarkFunnelAccountDto = Omit<DarkFunnelAccount, 'firstQualifiedAt' | 
 export type { DarkFunnelSettings, DigestSchedule };
 export type DigestDeliveryDto = Omit<DigestDelivery, 'sentAt'> & { sentAt: string };
 export type { RepPerformanceStats };
+
+// KAN-55 (AC3)
+export type { BusinessHours };
+export interface BusinessHoursConfig {
+  businessHours: BusinessHours | null;
+  timezone: string | null;
+}

@@ -26,6 +26,7 @@ import type {
   SlackStatus,
   SlackChannelDto,
   RepPresenceDto,
+  BusinessHoursConfig,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -440,5 +441,27 @@ export function useUpdateDigestScheduleMutation(workspaceId: string | null) {
         body: JSON.stringify(schedule),
       }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['digest-schedule', workspaceId] }),
+  });
+}
+
+// KAN-55 (AC3) — not under /analytics/, matching the backend's own route
+// choice (core workspace config, not an analytics setting).
+export function useBusinessHoursQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['business-hours', workspaceId],
+    queryFn: () => authFetch<BusinessHoursConfig>(`/api/workspaces/${workspaceId}/business-hours`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+export function useUpdateBusinessHoursMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (config: BusinessHoursConfig) =>
+      authFetch<BusinessHoursConfig>(`/api/workspaces/${workspaceId}/business-hours`, {
+        method: 'PATCH',
+        body: JSON.stringify(config),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['business-hours', workspaceId] }),
   });
 }

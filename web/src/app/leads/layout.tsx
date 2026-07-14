@@ -14,11 +14,11 @@ import { WidgetStatusIndicator } from '@/components/widget-status-indicator';
 // compact header indicator, KAN-66/67/68/69 (Lead Routing) attaches a
 // nested /leads/routing route, KAN-71/72/73 (CRM Integration) attaches a
 // nested /leads/crm route, KAN-48 (Slack OAuth) attaches a nested
-// /leads/slack route, and KAN-74/75/76/77 (Predictive Analytics)
+// /leads/slack route, KAN-74/75/76/77 (Predictive Analytics)
 // attach /leads/accounts, /leads/dark-funnel, /leads/rep-performance, and
-// /leads/digest — all without reworking this layout — see
-// PROJECT_STATUS_JULY_2026.md's wave sequencing. KAN-60 (usage/quota)
-// still has room to attach the same way.
+// /leads/digest, and KAN-55 (AC3) attaches /leads/business-hours — all
+// without reworking this layout — see PROJECT_STATUS_JULY_2026.md's wave
+// sequencing. KAN-60 (usage/quota) still has room to attach the same way.
 export default function LeadsLayout({ children }: { children: React.ReactNode }): React.ReactElement | null {
   const { accessToken, workspaceId, isInitializing, logout } = useAuth();
   const router = useRouter();
@@ -56,6 +56,7 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
           <Link href="/leads/dark-funnel">Dark funnel</Link>
           <Link href="/leads/rep-performance">Rep performance</Link>
           <Link href="/leads/digest">Digest</Link>
+          <Link href="/leads/business-hours">Business hours</Link>
         </nav>
         <div className="flex items-center gap-4">
           <WidgetStatusIndicator workspaceId={workspaceId} />
