@@ -6,6 +6,7 @@ import type {
   FeatureFlags,
   DarkFunnelSettings,
   DigestSchedule,
+  BusinessHours,
 } from '@gmleads/shared';
 
 interface WorkspaceRow {
@@ -20,6 +21,8 @@ interface WorkspaceRow {
   created_at: Date;
   dark_funnel_settings: DarkFunnelSettings;
   digest_schedule: DigestSchedule;
+  business_hours: BusinessHours | null;
+  timezone: string | null;
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
@@ -35,6 +38,8 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     createdAt: row.created_at,
     darkFunnelSettings: row.dark_funnel_settings,
     digestSchedule: row.digest_schedule,
+    businessHours: row.business_hours,
+    timezone: row.timezone,
   };
 }
 
@@ -101,6 +106,21 @@ export class WorkspaceRepo {
     const res = await this.db.query<WorkspaceRow>(
       `UPDATE workspaces SET digest_schedule = $2 WHERE id = $1 RETURNING *`,
       [id, schedule]
+    );
+    return res.rows[0] ? toWorkspace(res.rows[0]) : null;
+  }
+
+  // KAN-55 (AC3) — self-serve config, consumed by gmleads-notification's
+  // /internal/workspaces/:id/availability route via AvailabilityEvaluator.
+  // Both columns nullable (migration 011), so null/null is a valid,
+  // explicit "not configured" write, same as the initial unconfigured state.
+  async updateBusinessHours(
+    id: string,
+    input: { businessHours: BusinessHours | null; timezone: string | null }
+  ): Promise<Workspace | null> {
+    const res = await this.db.query<WorkspaceRow>(
+      `UPDATE workspaces SET business_hours = $2, timezone = $3 WHERE id = $1 RETURNING *`,
+      [id, input.businessHours ? JSON.stringify(input.businessHours) : null, input.timezone]
     );
     return res.rows[0] ? toWorkspace(res.rows[0]) : null;
   }

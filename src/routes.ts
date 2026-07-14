@@ -12,6 +12,7 @@ import {
   accountCsvRowSchema,
   updateDarkFunnelSettingsRequestSchema,
   updateDigestScheduleRequestSchema,
+  updateBusinessHoursRequestSchema,
   classifyMatchKey,
   hashPassword,
   verifyPassword,
@@ -486,6 +487,36 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       const updated = await workspaceRepo.updateDigestSchedule(req.params.id, parsed.data);
       if (!updated) return reply.code(404).send({ error: 'not_found' });
       return reply.send(updated.digestSchedule);
+    }
+  );
+
+  // KAN-55 (AC3) — self-serve business-hours/timezone config, not under
+  // /analytics/ since this is core workspace config, not an analytics
+  // setting (unlike dark-funnel-settings/digest-schedule above). The only
+  // consumer is gmleads-notification's availability route via
+  // AvailabilityEvaluator; this route never evaluates availability itself.
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/business-hours',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+      return reply.send({
+        businessHours: workspace.businessHours ?? null,
+        timezone: workspace.timezone ?? null,
+      });
+    }
+  );
+
+  app.patch<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/business-hours',
+    async (req, reply) => {
+      const parsed = updateBusinessHoursRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+      const updated = await workspaceRepo.updateBusinessHours(req.params.id, parsed.data);
+      if (!updated) return reply.code(404).send({ error: 'not_found' });
+      return reply.send({ businessHours: updated.businessHours, timezone: updated.timezone });
     }
   );
 

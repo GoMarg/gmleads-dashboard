@@ -1164,3 +1164,86 @@ describe('routing audit log (KAN-69)', () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+describe('business hours settings (KAN-55 AC3)', () => {
+  it('defaults to null/null for a newly created workspace', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+    });
+    expect(res.json()).toEqual({ businessHours: null, timezone: null });
+  });
+
+  it('gets and updates business hours + timezone', async () => {
+    const ws = await createTestWorkspace(db);
+    const businessHours = {
+      mon: { open: '09:00', close: '17:00' },
+      tue: { open: '09:00', close: '17:00' },
+    };
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+      payload: { businessHours, timezone: 'America/New_York' },
+    });
+    expect(patchRes.json()).toEqual({ businessHours, timezone: 'America/New_York' });
+
+    const getRes = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+    });
+    expect(getRes.json()).toEqual({ businessHours, timezone: 'America/New_York' });
+  });
+
+  it('rejects an invalid IANA timezone', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+      payload: { businessHours: null, timezone: 'Not/A_Zone' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a non-HH:mm window', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+      payload: { businessHours: { mon: { open: '9am', close: '17:00' } }, timezone: 'UTC' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('clears business hours back to null/null', async () => {
+    const ws = await createTestWorkspace(db);
+    await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+      payload: { businessHours: { mon: { open: '09:00', close: '17:00' } }, timezone: 'UTC' },
+    });
+
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/business-hours`,
+      payload: { businessHours: null, timezone: null },
+    });
+    expect(clearRes.json()).toEqual({ businessHours: null, timezone: null });
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const getRes = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/business-hours',
+    });
+    expect(getRes.statusCode).toBe(404);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/business-hours',
+      payload: { businessHours: null, timezone: null },
+    });
+    expect(patchRes.statusCode).toBe(404);
+  });
+});
