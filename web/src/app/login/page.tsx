@@ -18,9 +18,9 @@ export default function LoginPage(): React.ReactElement | null {
   if (isInitializing || accessToken) return null;
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
+    <main className="flex flex-1 flex-col items-center justify-center gap-8 p-6">
       <h1 className="text-xl font-semibold">GmLeads Dashboard</h1>
       <LoginForm />
-    </div>
+    </main>
   );
 }
