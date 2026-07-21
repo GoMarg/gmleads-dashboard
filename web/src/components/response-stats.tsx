@@ -46,6 +46,7 @@ export function ResponseStats({
           Alert response time
         </h2>
         <select
+          aria-label="Alert response time range"
           value={range}
           onChange={(e) => onRangeChange(e.target.value as RangePreset)}
           className="rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm dark:border-white/15"

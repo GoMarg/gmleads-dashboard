@@ -44,6 +44,7 @@ export default function FunnelPage(): React.ReactElement {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Funnel &amp; delivery analytics</h1>
         <select
+          aria-label="Funnel and delivery analytics date range"
           value={range}
           onChange={(e) => setRange(e.target.value as RangePreset)}
           className="rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm dark:border-white/15"

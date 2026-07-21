@@ -87,6 +87,7 @@ export function SlackConnectPanel({ workspaceId }: { workspaceId: string | null 
               {channels && (
                 <>
                   <select
+                    aria-label="Slack channel"
                     value={selectedChannelId}
                     onChange={(e) => setSelectedChannelId(e.target.value)}
                     className="rounded-md border border-black/10 bg-transparent px-2 py-1 text-sm dark:border-white/15"
