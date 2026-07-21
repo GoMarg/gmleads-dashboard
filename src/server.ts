@@ -13,6 +13,8 @@ async function start(): Promise<void> {
     app.log.error({ err }, 'unhandled rejection — service continues running');
   });
 
+  let analyticsScheduler: CronScheduler | null = null;
+
   // KAN-74/75/76 — real cron scheduling only runs in the actual server
   // process, never under buildApp()/tests, so vitest never has to manage
   // background timers. See Decision 2 — this is the only place node-cron
@@ -31,8 +33,8 @@ async function start(): Promise<void> {
       app.log
     );
 
-    const scheduler = new CronScheduler(app.log);
-    scheduler.schedule({
+    analyticsScheduler = new CronScheduler(app.log);
+    analyticsScheduler.schedule({
       name: 'nightly-account-scoring',
       cronExpression: '0 2 * * *', // 02:00 UTC daily
       run: async () => {
@@ -43,7 +45,7 @@ async function start(): Promise<void> {
         }
       },
     });
-    scheduler.schedule({
+    analyticsScheduler.schedule({
       name: 'hourly-digest-schedule-check',
       cronExpression: '0 * * * *', // every hour, on the hour, UTC
       run: async () => {
@@ -54,11 +56,32 @@ async function start(): Promise<void> {
         }
       },
     });
-    scheduler.start();
+    analyticsScheduler.start();
     app.log.info('analytics scheduler enabled (ENABLE_ANALYTICS_SCHEDULER=true)');
   } else {
     app.log.info('analytics scheduler disabled (set ENABLE_ANALYTICS_SCHEDULER=true to enable)');
   }
+
+  // Railway sends SIGTERM on every deploy — without this, in-flight
+  // requests get hard-killed and, if the analytics scheduler is enabled,
+  // its cron tasks keep the process alive instead of exiting cleanly.
+  let shuttingDown = false;
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    app.log.info(`${signal} received, shutting down gracefully`);
+    try {
+      analyticsScheduler?.stop();
+      await app.close();
+      await getDb().end();
+    } catch (err) {
+      app.log.error({ err }, 'error during shutdown');
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`dashboard listening on ${port}`);
