@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
-import { registerErrorHandler } from '@gmleads/shared';
+import { registerErrorHandler, getDb } from '@gmleads/shared';
 import { registerRoutes } from './routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -23,6 +23,21 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.get('/health', async () => {
     return { status: 'ok', service: 'dashboard' };
+  });
+
+  // Liveness (/health) never checks dependencies — a DB blip must not look
+  // like a crash to Railway's restart policy. This one is for external
+  // monitoring/load-balancer readiness decisions instead.
+  app.get('/health/ready', async (_req, reply) => {
+    try {
+      await getDb().query('SELECT 1');
+      return { status: 'ok', service: 'dashboard', checks: { db: 'ok' } };
+    } catch (err) {
+      app.log.error({ err }, 'readiness check failed');
+      return reply
+        .code(503)
+        .send({ status: 'error', service: 'dashboard', checks: { db: 'error' } });
+    }
   });
 
   await registerRoutes(app);
