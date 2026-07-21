@@ -45,20 +45,24 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-black/10 px-6 py-4 dark:border-white/15">
-        <nav className="flex items-center gap-4 text-sm font-medium">
-          <Link href="/leads">Leads</Link>
-          <Link href="/leads/funnel">Funnel</Link>
-          <Link href="/leads/routing">Routing</Link>
-          <Link href="/leads/crm">CRM</Link>
-          <Link href="/leads/slack">Slack</Link>
-          <Link href="/leads/accounts">Accounts</Link>
-          <Link href="/leads/dark-funnel">Dark funnel</Link>
-          <Link href="/leads/rep-performance">Rep performance</Link>
-          <Link href="/leads/digest">Digest</Link>
-          <Link href="/leads/business-hours">Business hours</Link>
+      <header className="flex flex-col gap-3 border-b border-black/10 px-6 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-white/15">
+        {/* Narrow viewports: scrolls horizontally rather than wrapping or
+            clipping — 10 links don't fit any small screen, and a hamburger
+            menu isn't worth the added state for an internal admin tool.
+            flex-shrink-0 keeps each link's text from being squeezed. */}
+        <nav className="flex items-center gap-4 overflow-x-auto text-sm font-medium">
+          <Link className="shrink-0" href="/leads">Leads</Link>
+          <Link className="shrink-0" href="/leads/funnel">Funnel</Link>
+          <Link className="shrink-0" href="/leads/routing">Routing</Link>
+          <Link className="shrink-0" href="/leads/crm">CRM</Link>
+          <Link className="shrink-0" href="/leads/slack">Slack</Link>
+          <Link className="shrink-0" href="/leads/accounts">Accounts</Link>
+          <Link className="shrink-0" href="/leads/dark-funnel">Dark funnel</Link>
+          <Link className="shrink-0" href="/leads/rep-performance">Rep performance</Link>
+          <Link className="shrink-0" href="/leads/digest">Digest</Link>
+          <Link className="shrink-0" href="/leads/business-hours">Business hours</Link>
         </nav>
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 items-center gap-4">
           <WidgetStatusIndicator workspaceId={workspaceId} />
           <button
             type="button"
