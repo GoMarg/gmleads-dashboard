@@ -12,9 +12,15 @@ locked stack; the backend stays on Railway per ADR-012).
 
 ```bash
 cp .env.local.example .env.local   # then set NEXT_PUBLIC_API_URL
+export GITHUB_PACKAGES_READ_TOKEN=<a PAT scoped to read-only Packages on gmleads-shared>
 npm install
 npm run dev
 ```
+
+`npm install` needs `GITHUB_PACKAGES_READ_TOKEN` in your shell environment
+(not `.env.local` — npm reads it via `.npmrc`, before the app itself ever
+starts) to authenticate the `@gomarg` scope against GitHub Packages for
+`@gomarg/shared-schemas`. See `../DEPLOYMENT.md` for where to get one.
 
 Requires `gmleads-gateway` (and, for it, `gmleads-dashboard`'s backend)
 running locally — see the root repo's `docker-compose.yml` in
@@ -35,7 +41,11 @@ running locally — see the root repo's `docker-compose.yml` in
   auth exactly as implemented). See ADR-014, Decision 1.
 - `workspaceId` is only ever read from the authenticated session (login/
   refresh response) — never a URL param or other user-editable input.
-- `@gmleads/shared`'s Zod schemas/types are imported via deep paths
-  (`@gmleads/shared/dist/schemas/index.js`), never the package's root
-  barrel — that barrel pulls in Node-only adapters (Postgres, Redis,
-  Argon2) that don't belong in a browser bundle. See ADR-014.
+- Shared Zod schemas/types come from `@gomarg/shared-schemas`, a separate
+  published npm package (GitHub Packages) — not `@gmleads/shared`, which
+  pulls in Node-only backend deps (Postgres, Redis, Argon2, Fastify) that
+  don't belong in a browser bundle, and which Vercel's build sandbox can't
+  reach anyway (no access to sibling repos). See
+  `gmleads-shared/packages/shared-schemas/README.md` for the full
+  shared/shared-schemas boundary, and `../DEPLOYMENT.md` for how this
+  actually deploys.

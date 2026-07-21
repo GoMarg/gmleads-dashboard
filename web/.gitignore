@@ -30,8 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — but *.example templates should be committed (they were
+# silently un-committed before this rule existed, since `.env*` matched
+# them too; see DEPLOYMENT.md/README.md for what these document)
 .env*
+!.env*.example
 
 # vercel
 .vercel
