@@ -68,28 +68,25 @@ jobs:
   # rather than folded into `quality`, per KAN-100's design decisions.
   quality-web:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: GoMarg/gmleads-shared
-          path: gmleads-shared-src
-          ref: develop
-          token: ${{ secrets.SHARED_REPO_PAT }}
-      # Same sibling-checkout trick as the `quality` job above — web/'s
-      # @gmleads/shared dependency is `file:../../gmleads-shared`, which
-      # resolves to the same ../gmleads-shared location relative to this
-      # repo's checkout root.
-      - run: cp -r gmleads-shared-src ../gmleads-shared
       - uses: actions/setup-node@v4
-        with: { node-version: "20", cache: "npm", cache-dependency-path: web/package-lock.json }
-      - name: Build @gmleads/shared
-        working-directory: ../gmleads-shared
-        run: |
-          npm ci --ignore-scripts
-          npm run build
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@gomarg"
+      # web/'s only external dependency (@gomarg/shared-schemas) is a real
+      # published package now, not a sibling file: checkout — no more
+      # gmleads-shared checkout/build needed here at all.
       - working-directory: web
         run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - working-directory: web
         run: npm run typecheck
       - working-directory: web
