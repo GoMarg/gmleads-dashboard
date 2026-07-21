@@ -83,10 +83,16 @@ jobs:
       # web/'s only external dependency (@gomarg/shared-schemas) is a real
       # published package now, not a sibling file: checkout — no more
       # gmleads-shared checkout/build needed here at all.
+      # web/.npmrc (also used by Vercel) maps the @gomarg scope's auth to
+      # GITHUB_PACKAGES_READ_TOKEN specifically — that project-level .npmrc
+      # takes precedence over setup-node's generated one, so the env var
+      # name here must match it exactly, not the more common NODE_AUTH_TOKEN
+      # convention (confirmed the mismatch was the actual cause of the
+      # first 401 here, not a real permissions gap).
       - working-directory: web
         run: npm ci
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PACKAGES_READ_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - working-directory: web
         run: npm run typecheck
       - working-directory: web
