@@ -1,4 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "cd ../.. && git clone --branch develop --depth 1 https://x-access-token:$SHARED_REPO_PAT@github.com/GoMarg/gmleads-shared.git gmleads-shared && cd gmleads-shared && npm ci --ignore-scripts && npm run build && cd - > /dev/null && npm ci"
-}

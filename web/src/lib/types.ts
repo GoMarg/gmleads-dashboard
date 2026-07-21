@@ -1,4 +1,4 @@
-// KAN-100: reuses @gmleads/shared's canonical Session/ConversationTurn
+// KAN-100: reuses @gomarg/shared-schemas's canonical Session/ConversationTurn
 // shapes (see contracts.md) rather than redefining them — only overrides
 // the Date fields, since Fastify serializes them as ISO strings over the
 // wire and the shared types model the in-process (Date object) shape.
@@ -21,7 +21,7 @@ import type {
   RepPerformanceStats,
   SlackChannel,
   BusinessHours,
-} from '@gmleads/shared';
+} from '@gomarg/shared-schemas';
 
 export type { SessionStatus, AlertResponseAction };
 

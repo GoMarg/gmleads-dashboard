@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { loginRequestSchema, type LoginRequest } from '@gmleads/shared/dist/schemas/index.js';
+import { loginRequestSchema, type LoginRequest } from '@gomarg/shared-schemas';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 
