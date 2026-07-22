@@ -14,7 +14,7 @@ jobs:
       - name: Scan working tree for secrets (gitleaks OSS, no license required)
         run: |
           docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect \
-            --source /repo --no-git -v
+            --source /repo --no-git -v --config /repo/.gitleaks.toml
 
   quality:
     runs-on: ubuntu-latest

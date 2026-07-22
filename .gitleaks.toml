@@ -1,0 +1,13 @@
+title = "gmleads gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+# .env.*.example files are checked-in templates documenting which variable
+# NAMES a deployer needs to set — by project convention they never contain
+# real values, only placeholders. Without this, gitleaks' generic-api-key
+# rule false-positives on adjacent lines in these files.
+paths = [
+  '''\.example$''',
+]
