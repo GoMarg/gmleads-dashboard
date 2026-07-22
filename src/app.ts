@@ -12,6 +12,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     // fall back to a fresh UUID for calls that don't go through gateway.
     genReqId: (req) => (req.headers['x-request-id'] as string) || randomUUID(),
     logger: {
+      base: { service: 'dashboard', environment: process.env.RAILWAY_ENVIRONMENT_NAME ?? 'development' },
       redact: [
         'req.headers.authorization',
         'req.body.slackWebhookUrl',
@@ -19,6 +20,17 @@ export async function buildApp(): Promise<FastifyInstance> {
         'req.body.password',
         'req.body.refreshToken',
       ],
+      ...(process.env.LOGTAIL_SOURCE_TOKEN
+        ? {
+            transport: {
+              target: '@logtail/pino',
+              options: {
+                sourceToken: process.env.LOGTAIL_SOURCE_TOKEN,
+                options: { endpoint: `https://${process.env.LOGTAIL_INGESTING_HOST}` },
+              },
+            },
+          }
+        : {}),
     },
   });
   registerErrorHandler(app);
