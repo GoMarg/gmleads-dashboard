@@ -23,6 +23,7 @@ interface WorkspaceRow {
   digest_schedule: DigestSchedule;
   business_hours: BusinessHours | null;
   timezone: string | null;
+  monthly_session_quota: number;
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
@@ -40,6 +41,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     digestSchedule: row.digest_schedule,
     businessHours: row.business_hours,
     timezone: row.timezone,
+    monthlySessionQuota: row.monthly_session_quota,
   };
 }
 
