@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
 import { registerErrorHandler, getDb } from '@gmleads/shared';
@@ -6,6 +7,10 @@ import { rateLimit } from './rate-limit.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
+    // Reuse gateway's correlation ID (forwarded as x-request-id) so one
+    // request traces across every service's logs under the same reqId;
+    // fall back to a fresh UUID for calls that don't go through gateway.
+    genReqId: (req) => (req.headers['x-request-id'] as string) || randomUUID(),
     logger: {
       redact: [
         'req.headers.authorization',
