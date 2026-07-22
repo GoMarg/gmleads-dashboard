@@ -4,6 +4,7 @@ import { buildApp } from './app.js';
 import { CronScheduler } from './scheduler/cron-scheduler.js';
 import { buildAnalyticsServices } from './analytics/build-analytics-services.js';
 import { WorkspaceRepo } from './db/workspace.repo.js';
+import { disconnectRateLimiter } from './rate-limit.js';
 
 // Error tracking (Better Stack, Sentry-SDK-compatible — M3 task 3.4). Only
 // active when configured, so local/CI runs never report noise. 5xx route
@@ -88,6 +89,7 @@ async function start(): Promise<void> {
       analyticsScheduler?.stop();
       await app.close();
       await getDb().end();
+      disconnectRateLimiter(); // M4 task 4.4 — previously leaked on shutdown
     } catch (err) {
       app.log.error({ err }, 'error during shutdown');
     } finally {
