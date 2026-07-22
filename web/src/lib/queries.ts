@@ -9,6 +9,7 @@ import type {
   FunnelStats,
   DeliveryStats,
   WidgetStatus,
+  UsageSummary,
   IdentificationAccuracyStats,
   RepDto,
   AccountAssignmentDto,
@@ -132,6 +133,15 @@ export function useWidgetStatusQuery(workspaceId: string | null) {
   return useQuery({
     queryKey: ['widget-status', workspaceId],
     queryFn: () => authFetch<WidgetStatus>(`/api/workspaces/${workspaceId}/widget-status`),
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// KAN-60 — same single-fetch-per-mount convention as useWidgetStatusQuery.
+export function useUsageQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['usage', workspaceId],
+    queryFn: () => authFetch<UsageSummary>(`/api/workspaces/${workspaceId}/usage`),
     enabled: Boolean(workspaceId),
   });
 }

@@ -14,6 +14,7 @@ async function createTestSession(
     icpScore?: number;
     alertedAt?: Date;
     firmographics?: Record<string, unknown> | null;
+    createdAt?: Date;
   } = {}
 ): Promise<string> {
   // Mirrors gmleads-session's real invariant (session.repo.ts's setStatus):
@@ -33,9 +34,11 @@ async function createTestSession(
   // directly against Postgres while building this test. `firmographics:
   // null` still means SQL NULL (the 'failed identification' case), not
   // the JSON literal null, because it's passed through untouched here.
+  // KAN-60: created_at defaults to now() when omitted — explicit only for
+  // tests that need a session outside the current usage period.
   const res = await db.query<{ id: string }>(
-    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at, firmographics)
-     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4, $5)
+    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at, firmographics, created_at)
+     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4, $5, COALESCE($6, now()))
      RETURNING id`,
     [
       workspaceId,
@@ -43,6 +46,7 @@ async function createTestSession(
       overrides.icpScore ?? 0,
       alertedAt,
       overrides.firmographics !== undefined ? overrides.firmographics : null,
+      overrides.createdAt ?? null,
     ]
   );
   return res.rows[0]!.id;
@@ -786,6 +790,63 @@ describe('GET /internal/workspaces/:id/widget-status', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/widget-status',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('GET /internal/workspaces/:id/usage (KAN-60)', () => {
+  it('counts only sessions created within the current calendar month', async () => {
+    const ws = await createTestWorkspace(db);
+    await createTestSession(ws.id);
+    await createTestSession(ws.id);
+    // Outside the current period — must not count toward sessionsUsed.
+    await createTestSession(ws.id, {
+      createdAt: new Date(Date.UTC(2020, 0, 15)),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/usage`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.sessionsUsed).toBe(2);
+    expect(body.sessionsQuota).toBe(1000); // migration 012's DEFAULT
+    expect(new Date(body.periodStart).getUTCDate()).toBe(1);
+  });
+
+  it('reflects a workspace-specific quota override', async () => {
+    const ws = await createTestWorkspace(db);
+    await db.query('UPDATE workspaces SET monthly_session_quota = $2 WHERE id = $1', [ws.id, 5]);
+    await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/usage`,
+    });
+    expect(res.json()).toEqual(
+      expect.objectContaining({ sessionsUsed: 1, sessionsQuota: 5 })
+    );
+  });
+
+  it('scopes strictly per workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    await createTestSession(ws1.id);
+    await createTestSession(ws1.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws2.id}/usage`,
+    });
+    expect(res.json()).toEqual(expect.objectContaining({ sessionsUsed: 0 }));
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/usage',
     });
     expect(res.statusCode).toBe(404);
   });
