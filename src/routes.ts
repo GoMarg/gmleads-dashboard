@@ -28,6 +28,7 @@ import { UsersRepo } from './db/users.repo.js';
 import { RefreshTokensRepo } from './db/refresh-tokens.repo.js';
 import { AlertResponsesRepo } from './db/alert-responses.repo.js';
 import { AnalyticsRepo } from './db/analytics.repo.js';
+import { UsageRepo } from './db/usage.repo.js';
 import { RepsRepo } from './db/reps.repo.js';
 import { AccountAssignmentsRepo } from './db/account-assignments.repo.js';
 import { RoutingEventsRepo } from './db/routing-events.repo.js';
@@ -62,6 +63,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   const refreshTokensRepo = new RefreshTokensRepo(db);
   const alertResponsesRepo = new AlertResponsesRepo(db);
   const analyticsRepo = new AnalyticsRepo(db);
+  const usageRepo = new UsageRepo(db);
   const repsRepo = new RepsRepo(db);
   const accountAssignmentsRepo = new AccountAssignmentsRepo(db);
   const routingEventsRepo = new RoutingEventsRepo(db);
@@ -233,6 +235,24 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
       const status = await analyticsRepo.getWidgetStatus(req.params.id);
       return reply.send(status);
+    }
+  );
+
+  // KAN-60 — sessions used vs monthly_session_quota for the current
+  // calendar month. No date-range params (unlike the analytics routes
+  // above) — the "current period" is always server-computed, see
+  // usage.repo.ts.
+  app.get<{ Params: { id: string } }>(
+    '/internal/workspaces/:id/usage',
+    async (req, reply) => {
+      const workspace = await workspaceRepo.findById(req.params.id);
+      if (!workspace) return reply.code(404).send({ error: 'not_found' });
+
+      const usage = await usageRepo.getCurrentPeriodUsage(
+        workspace.id,
+        workspace.monthlySessionQuota ?? 1000
+      );
+      return reply.send(usage);
     }
   );
 
