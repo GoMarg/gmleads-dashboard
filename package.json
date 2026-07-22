@@ -41,6 +41,7 @@
   "dependencies": {
     "@fastify/multipart": "^10.1.0",
     "@gmleads/shared": "file:../gmleads-shared",
+    "@logtail/pino": "^0.5.8",
     "@types/node-cron": "^3.0.11",
     "axios": "^1.18.1",
     "csv-parse": "^7.0.1",
