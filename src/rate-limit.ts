@@ -24,7 +24,11 @@ export async function rateLimit(req: FastifyRequest, reply: FastifyReply): Promi
 
   const forwardedFor = req.headers['x-forwarded-for'] as string | undefined;
   const ip = forwardedFor ? forwardedFor.split(',')[0]!.trim() : req.ip;
-  const key = `ratelimit:${ip}:${Math.floor(Date.now() / (WINDOW_SECONDS * 1000))}`;
+  // All 7 services share one Redis instance — without a per-service prefix,
+  // two services that happen to see the same caller identity (e.g. every
+  // service sees "127.0.0.1" for its own loopback health check) collide on
+  // the same counter and cross-contaminate each other's limits.
+  const key = `ratelimit:dashboard:${ip}:${Math.floor(Date.now() / (WINDOW_SECONDS * 1000))}`;
 
   try {
     const count = await redis.incr(key);
