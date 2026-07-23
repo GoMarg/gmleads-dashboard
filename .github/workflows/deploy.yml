@@ -1,17 +1,29 @@
 name: Deploy
 
-# KAN-31 scaffolding. Intentionally workflow_dispatch-only and NOT wired to
-# any push trigger — it must stay inert until a real Railway project exists.
-# See gmleads-agents/context/adr/ for the full staging/prod deployment
-# design (image-based deploy from GHCR, not a git-triggered rebuild, because
-# this repo's Dockerfile depends on a sibling gmleads-shared checkout that a
-# Railway-native git build wouldn't have access to).
+# M5.6 (M5 roadmap — see gmleads-agents/context/M5_AUDIT.md). Codifies the
+# manual promotion procedure rehearsed by hand in M5.5 (2026-07-23): resolve
+# an immutable ghcr.io sha-<short> tag, repoint the Railway service at it,
+# wait for the deployment to succeed, verify it's actually serving traffic.
+# Full procedure + rollback instructions: OPERATIONS.md's "Promotion
+# workflow" section.
 #
-# The serviceInstanceUpdate call below is UNVERIFIED — there is no live
-# Railway project to test it against yet. It reflects Railway's publicly
-# documented GraphQL API as of this writing, not a confirmed-working
-# integration. Validate (and fix if needed) the first time real
-# RAILWAY_TOKEN/service-ID secrets exist, before relying on it.
+# Still workflow_dispatch-only and still inert without real Railway
+# credentials (see the guard clause below). Provisioning
+# RAILWAY_STAGING_TOKEN / RAILWAY_PROD_TOKEN — one Railway *project token*
+# per environment, created from the Railway dashboard (Project Settings →
+# Tokens; the CLI has no token-creation command) — is a deliberately
+# deferred manual prerequisite, not done as part of this change: minting a
+# long-lived credential with deploy access isn't something to do
+# unattended. Same for GitHub Environment protection rules (e.g. required
+# reviewers on the `production` environment) — recommended, not configured
+# here.
+#
+# UNVERIFIED, pending the first real rehearsal run (see OPERATIONS.md):
+# this assumes a Railway project token is scoped to a single environment,
+# so `railway` commands below pass --service but never --environment. If
+# the first rehearsal shows a project token isn't environment-scoped the
+# way Railway's docs implied, add --environment "${{ inputs.environment }}"
+# to the `service source connect` and `service list` calls below.
 
 on:
   workflow_dispatch:
@@ -22,45 +34,117 @@ on:
         type: choice
         options: [staging, production]
       image_tag:
-        description: "GHCR tag to deploy (e.g. sha-abc1234, develop, main). Must already exist in ghcr.io/gomarg/<this repo> — this workflow never builds an image, only repoints Railway at one that the publish job already pushed."
-        required: true
+        description: >-
+          Immutable GHCR tag to deploy, e.g. sha-abc1234. Leave blank for a
+          staging deploy to auto-resolve the tag from the latest successful
+          CI run on develop. Production has no auto-resolve — pass the
+          exact sha-<short> tag already verified in staging (see that
+          staging run's summary, or M5_AUDIT.md's pinned-digest record).
+          Also how you roll back: pass any previously-verified sha- tag for
+          either environment.
+        required: false
         type: string
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    env:
+      RAILWAY_TOKEN: ${{ inputs.environment == 'production' && secrets.RAILWAY_PROD_TOKEN || secrets.RAILWAY_STAGING_TOKEN }}
+      IMAGE_REPO: ghcr.io/gomarg/${{ github.event.repository.name }}
     steps:
-      - name: Guard — refuse to run without real Railway credentials
+      - name: Guard — refuse to run without a real Railway project token
         run: |
-          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
-            echo "::error::RAILWAY_TOKEN is not set. No Railway project has been provisioned for this repo yet (KAN-31 is blocked on that). Nothing to deploy."
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::No Railway project token set for '${{ inputs.environment }}' (expected secrets.RAILWAY_STAGING_TOKEN or secrets.RAILWAY_PROD_TOKEN). See OPERATIONS.md's Promotion workflow prerequisites."
             exit 1
           fi
 
-      - name: Resolve target service ID
-        id: service
+      - name: Guard — production requires an explicit, already-verified tag
+        if: inputs.environment == 'production' && inputs.image_tag == ''
         run: |
-          if [ "${{ inputs.environment }}" = "production" ]; then
-            SERVICE_ID="${{ secrets.RAILWAY_PROD_SERVICE_ID }}"
+          echo "::error::production requires an explicit image_tag: the exact sha-<short> tag already verified in staging. Auto-resolution from develop is staging-only, deliberately — production should only ever run something already proven, not a fresh commit."
+          exit 1
+
+      - name: Resolve image tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
           else
-            SERVICE_ID="${{ secrets.RAILWAY_STAGING_SERVICE_ID }}"
+            RUN_SHA=$(gh api "repos/${{ github.repository }}/actions/runs?branch=develop&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty')
+            if [ -z "$RUN_SHA" ]; then
+              echo "::error::No successful CI run found on develop to auto-resolve a tag from."
+              exit 1
+            fi
+            TAG="sha-${RUN_SHA:0:7}"
           fi
-          if [ -z "$SERVICE_ID" ]; then
-            echo "::error::No Railway service ID secret set for environment '${{ inputs.environment }}'."
-            exit 1
-          fi
-          echo "id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Point Railway service at the given GHCR image tag
+      - name: Verify the resolved tag actually exists in GHCR
         run: |
-          IMAGE="ghcr.io/gomarg/${{ github.event.repository.name }}:${{ inputs.image_tag }}"
-          curl -sS -X POST https://backboard.railway.app/graphql/v2 \
-            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"query\":\"mutation(\$serviceId: String!, \$image: String!) { serviceInstanceUpdate(serviceId: \$serviceId, input: { source: { image: \$image } }) }\",\"variables\":{\"serviceId\":\"${{ steps.service.outputs.id }}\",\"image\":\"$IMAGE\"}}" \
-            | tee /tmp/railway-response.json
-          if grep -q '"errors"' /tmp/railway-response.json; then
-            echo "::error::Railway API returned an error — see output above."
+          IMAGE="$IMAGE_REPO:${{ steps.resolve.outputs.tag }}"
+          if ! docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "::error::$IMAGE does not exist in GHCR — nothing to promote."
             exit 1
           fi
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Sanity-check Railway auth
+        run: railway status --json >/dev/null
+
+      - name: Record the currently running image (for rollback reference)
+        id: before
+        run: |
+          PREV=$(railway service list --json 2>/dev/null \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); m=[s for s in d if s['name']=='${{ github.event.repository.name }}']; print(m[0]['source'].get('image','unknown') if m else 'unknown')")
+          echo "previous_image=$PREV" >> "$GITHUB_OUTPUT"
+
+      - name: Point Railway service at the resolved image
+        run: railway service source connect --image "$IMAGE" --service "${{ github.event.repository.name }}" --json
+
+      - name: Wait for the deployment to succeed
+        run: |
+          for i in $(seq 1 30); do
+            STATUS=$(railway service list --json 2>/dev/null \
+              | python3 -c "import json,sys; d=json.load(sys.stdin); m=[s for s in d if s['name']=='${{ github.event.repository.name }}']; print(m[0]['latestDeployment']['status'] if m else 'UNKNOWN')")
+            echo "status: $STATUS"
+            if [ "$STATUS" = "SUCCESS" ]; then exit 0; fi
+            if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CRASHED" ]; then
+              echo "::error::Deployment ended in $STATUS — check 'railway logs --service ${{ github.event.repository.name }}'."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for the deployment to reach SUCCESS."
+          exit 1
+
+      - name: Verify /health (gateway only — the only publicly reachable service)
+        if: github.event.repository.name == 'gmleads-gateway'
+        run: |
+          URL="https://gmleads-gateway-${{ inputs.environment }}.up.railway.app/health"
+          CODE=$(curl -s -o /tmp/health.json -w "%{http_code}" "$URL")
+          cat /tmp/health.json; echo
+          if [ "$CODE" != "200" ]; then
+            echo "::error::$URL returned HTTP $CODE, not 200."
+            exit 1
+          fi
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy — ${{ github.event.repository.name }} → ${{ inputs.environment }}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Triggered by | ${{ github.actor }} |"
+            echo "| Previous image | \`${{ steps.before.outputs.previous_image }}\` |"
+            echo "| New image | \`$IMAGE\` |"
+            echo "| Resolved tag | \`${{ steps.resolve.outputs.tag }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
