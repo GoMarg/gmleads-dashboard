@@ -1,9 +1,13 @@
 'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { useRespondMutation } from '@/lib/queries';
+import { useRespondMutation, useSnoozeMutation } from '@/lib/queries';
 import { formatDuration } from '@/lib/format-duration';
 import type { ConversationTurnDto, Lead } from '@/lib/types';
+
+// KAN-52 — one preset (1 hour), matching the existing claim/dismiss
+// pattern's "minimal trigger" style rather than a full duration picker.
+const SNOOZE_MINUTES = 60;
 
 function TurnBubble({ turn }: { turn: ConversationTurnDto }): React.ReactElement {
   const isVisitor = turn.role === 'visitor';
@@ -33,6 +37,7 @@ function TurnBubble({ turn }: { turn: ConversationTurnDto }): React.ReactElement
 function ResponseActions({ session }: { session: Lead }): React.ReactElement | null {
   const { workspaceId } = useAuth();
   const respond = useRespondMutation(workspaceId);
+  const snooze = useSnoozeMutation(workspaceId);
 
   if (session.responseAction !== null) {
     return (
@@ -40,6 +45,19 @@ function ResponseActions({ session }: { session: Lead }): React.ReactElement | n
         {session.responseTimeMs !== null
           ? `Responded (${session.responseAction}) after ${formatDuration(session.responseTimeMs)}`
           : `Responded: ${session.responseAction}`}
+      </p>
+    );
+  }
+
+  // KAN-52 — a snooze is not a response (see migration 015's comment), so
+  // this is a separate check from responseAction above, not an else-branch
+  // of it. While snoozed, hide the action buttons rather than let a rep
+  // re-trigger them immediately.
+  const isSnoozed = session.snoozedUntil !== null && new Date(session.snoozedUntil) > new Date();
+  if (isSnoozed) {
+    return (
+      <p className="text-sm text-black/60 dark:text-white/60">
+        Snoozed until {new Date(session.snoozedUntil!).toLocaleString()}
       </p>
     );
   }
@@ -62,7 +80,16 @@ function ResponseActions({ session }: { session: Lead }): React.ReactElement | n
       >
         Dismiss
       </button>
+      <button
+        type="button"
+        disabled={snooze.isPending}
+        onClick={() => snooze.mutate({ sessionId: session.id, minutes: SNOOZE_MINUTES })}
+        className="rounded-md border border-black/10 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-white/15"
+      >
+        Snooze 1h
+      </button>
       {respond.isError && <p className="text-sm text-red-600">Could not record response.</p>}
+      {snooze.isError && <p className="text-sm text-red-600">Could not snooze.</p>}
     </div>
   );
 }

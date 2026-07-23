@@ -15,6 +15,7 @@ export default function LeadsPage(): React.ReactElement {
     status: '',
     minScore: '',
     identificationSource: '',
+    hideSnoozed: false,
   });
   const [offset, setOffset] = useState(0);
   const [range, setRange] = useState<RangePreset>('7d');
@@ -24,6 +25,7 @@ export default function LeadsPage(): React.ReactElement {
     status: filters.status || undefined,
     minScore,
     identificationSource: filters.identificationSource || undefined,
+    hideSnoozed: filters.hideSnoozed,
     limit: PAGE_SIZE,
     offset,
   });

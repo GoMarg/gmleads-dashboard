@@ -45,7 +45,14 @@ export function LeadsTable({ leads }: { leads: Lead[] }): React.ReactElement {
                 {lead.companyName ?? 'Unknown company'}
               </Link>
             </td>
-            <td className="py-2 pr-4 capitalize">{lead.status}</td>
+            <td className="py-2 pr-4 capitalize">
+              {lead.status}
+              {lead.snoozedUntil !== null && new Date(lead.snoozedUntil) > new Date() && (
+                <span className="ml-2 rounded bg-black/5 px-1.5 py-0.5 text-xs normal-case text-black/50 dark:bg-white/10 dark:text-white/50">
+                  snoozed
+                </span>
+              )}
+            </td>
             <td className="py-2 pr-4">{lead.icpScore}</td>
             <td className="py-2 pr-4">
               <ResponseCell lead={lead} />

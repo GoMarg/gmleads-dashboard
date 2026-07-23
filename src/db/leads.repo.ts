@@ -22,6 +22,7 @@ interface SessionRow {
   pages_viewed: number;
   is_returning: boolean;
   created_at: Date;
+  snoozed_until: Date | null;
   delivered_at: Date | null;
   response_action: AlertResponseAction | null;
   responded_at: Date | null;
@@ -68,6 +69,7 @@ function toLead(row: SessionRow): Lead {
     pagesViewed: row.pages_viewed,
     isReturning: row.is_returning,
     createdAt: row.created_at,
+    snoozedUntil: row.snoozed_until,
     responseAction: row.response_action,
     responseTimeMs,
   };
@@ -96,6 +98,11 @@ export interface LeadFilters {
   status?: SessionStatus;
   minScore?: number;
   identificationSource?: IdentificationSourceFilter;
+  // KAN-52 — excludes sessions currently snoozed (snoozed_until in the
+  // future) from the result set. Opt-in, default false: listLeads is used
+  // for general lead browsing, not just a rep's "needs attention" queue,
+  // so hiding snoozed items isn't the right default everywhere it's called.
+  hideSnoozed?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -121,6 +128,9 @@ export class LeadsRepo {
       params.push(filters.identificationSource);
       conditions.push(`s.firmographics->>'source' = $${params.length}`);
     }
+    if (filters.hideSnoozed) {
+      conditions.push('(s.snoozed_until IS NULL OR s.snoozed_until <= NOW())');
+    }
 
     const limit = Math.min(filters.limit ?? 50, 200);
     const offset = filters.offset ?? 0;
@@ -134,6 +144,20 @@ export class LeadsRepo {
       params
     );
     return res.rows.map(toLead);
+  }
+
+  // KAN-52 — sets snoozed_until to now() + minutes, server-computed to
+  // avoid client clock-skew issues. Returns null if the session doesn't
+  // belong to this workspace (caller 404s), otherwise the new timestamp.
+  async snooze(workspaceId: string, sessionId: string, minutes: number): Promise<Date | null> {
+    const res = await this.db.query<{ snoozed_until: Date }>(
+      `UPDATE sessions
+       SET snoozed_until = NOW() + ($1 || ' minutes')::interval
+       WHERE id = $2 AND workspace_id = $3
+       RETURNING snoozed_until`,
+      [minutes, sessionId, workspaceId]
+    );
+    return res.rows[0]?.snoozed_until ?? null;
   }
 
   async getSessionWithTurns(

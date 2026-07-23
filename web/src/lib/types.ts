@@ -83,9 +83,10 @@ export interface RepPresenceDto {
 // KAN-59: every Lead is a Session enriched with response-time data — see
 // gmleads-dashboard's leads.repo.ts, which always joins the two so this
 // list and the session replay page can never disagree.
-export type Lead = Omit<Session, 'createdAt' | 'alertedAt'> & {
+export type Lead = Omit<Session, 'createdAt' | 'alertedAt' | 'snoozedUntil'> & {
   createdAt: string;
   alertedAt: string | null;
+  snoozedUntil: string | null;
   responseAction: AlertResponseAction | null;
   responseTimeMs: number | null;
 };
@@ -111,6 +112,7 @@ export interface LeadFilters {
   status?: SessionStatus;
   minScore?: number;
   identificationSource?: IdentificationSourceFilter;
+  hideSnoozed?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -149,6 +151,11 @@ export interface IdentificationAccuracyStats {
 export interface RespondResponse {
   action: AlertResponseAction;
   respondedAt: string;
+}
+
+// KAN-52
+export interface SnoozeResponse {
+  snoozedUntil: string;
 }
 
 // KAN-101

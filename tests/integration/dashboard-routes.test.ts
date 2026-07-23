@@ -274,6 +274,32 @@ describe('GET /internal/workspaces/:id/leads', () => {
     expect(res.json().leads).toHaveLength(1);
     expect(res.json().leads[0].firmographics).toBeNull();
   });
+
+  it('hideSnoozed=true excludes a currently-snoozed session but includes an unsnoozed one (KAN-52)', async () => {
+    const ws = await createTestWorkspace(db);
+    const snoozedId = await createTestSession(ws.id);
+    const normalId = await createTestSession(ws.id);
+    await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/${snoozedId}/snooze`,
+      payload: { minutes: 60 },
+    });
+
+    const hidden = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/leads?hideSnoozed=true`,
+    });
+    const hiddenIds = hidden.json().leads.map((l: { id: string }) => l.id);
+    expect(hiddenIds).not.toContain(snoozedId);
+    expect(hiddenIds).toContain(normalId);
+
+    const shown = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/leads`,
+    });
+    const shownIds = shown.json().leads.map((l: { id: string }) => l.id);
+    expect(shownIds).toContain(snoozedId); // default (no hideSnoozed) still shows it
+  });
 });
 
 describe('GET /internal/workspaces/:id/sessions/:sid', () => {
@@ -430,6 +456,93 @@ describe('POST /internal/workspaces/:id/sessions/:sid/respond', () => {
       method: 'POST',
       url: `/internal/workspaces/${ws.id}/sessions/00000000-0000-0000-0000-000000000000/respond`,
       payload: { action: 'claimed' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('PATCH /internal/workspaces/:id/sessions/:sid/snooze (KAN-52)', () => {
+  it('sets snoozed_until to roughly now + minutes', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const before = Date.now();
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/snooze`,
+      payload: { minutes: 60 },
+    });
+    expect(res.statusCode).toBe(200);
+    const snoozedUntil = new Date(res.json().snoozedUntil).getTime();
+    const expectedMs = before + 60 * 60_000;
+    expect(Math.abs(snoozedUntil - expectedMs)).toBeLessThan(5000); // real clock, small slack
+  });
+
+  it('does not create an alert_responses row — a snooze is not a response', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/snooze`,
+      payload: { minutes: 60 },
+    });
+
+    // A real future respond() call must still succeed -- if snooze had
+    // (incorrectly) written to alert_responses, this would be blocked by
+    // that table's UNIQUE(session_id)/"first response wins" behavior.
+    const respondRes = await app.inject({
+      method: 'POST',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/respond`,
+      payload: { action: 'claimed' },
+    });
+    expect(respondRes.statusCode).toBe(200);
+    expect(respondRes.json().action).toBe('claimed');
+  });
+
+  it('rejects a non-positive minutes value', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/snooze`,
+      payload: { minutes: 0 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a minutes value beyond the 7-day cap', async () => {
+    const ws = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws.id);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/${sessionId}/snooze`,
+      payload: { minutes: 10081 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('404s when the session belongs to a different workspace (tenant isolation)', async () => {
+    const ws1 = await createTestWorkspace(db);
+    const ws2 = await createTestWorkspace(db);
+    const sessionId = await createTestSession(ws1.id);
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws2.id}/sessions/${sessionId}/snooze`,
+      payload: { minutes: 60 },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('404s for a nonexistent session', async () => {
+    const ws = await createTestWorkspace(db);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/internal/workspaces/${ws.id}/sessions/00000000-0000-0000-0000-000000000000/snooze`,
+      payload: { minutes: 60 },
     });
     expect(res.statusCode).toBe(404);
   });

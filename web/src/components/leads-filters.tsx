@@ -13,6 +13,7 @@ export interface LeadsFilterState {
   status: SessionStatus | '';
   minScore: string; // kept as raw string while editing; parsed by the caller
   identificationSource: IdentificationSourceFilterValue | '';
+  hideSnoozed: boolean;
 }
 
 export function LeadsFilters({
@@ -80,6 +81,18 @@ export function LeadsFilters({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="flex items-center gap-2 pb-1.5">
+        <input
+          id="hide-snoozed-filter"
+          type="checkbox"
+          checked={value.hideSnoozed}
+          onChange={(e) => onChange({ ...value, hideSnoozed: e.target.checked })}
+        />
+        <label htmlFor="hide-snoozed-filter" className="text-sm font-medium">
+          Hide snoozed
+        </label>
       </div>
     </div>
   );
