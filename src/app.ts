@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import multipart from '@fastify/multipart';
-import { registerErrorHandler, getDb } from '@gmleads/shared';
+import { registerErrorHandler, getDb, internalAuth } from '@gmleads/shared';
 import { registerRoutes } from './routes.js';
 import { rateLimit } from './rate-limit.js';
 
@@ -34,6 +34,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   registerErrorHandler(app);
+  // M5 task 5.3 (booking#7) — defense-in-depth: rejects a request that
+  // didn't come through gateway's proxy, once INTERNAL_SERVICE_SECRET is
+  // configured. Runs before rate limiting — an unauthorized request
+  // shouldn't consume rate-limit budget.
+  app.addHook('preHandler', internalAuth);
   app.addHook('preHandler', rateLimit);
   // KAN-66: CSV account-list upload. 1MB cap is generous for a CSV of
   // account/rep-email rows — large enough for real tenant usage, small
