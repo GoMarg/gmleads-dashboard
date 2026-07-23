@@ -17,6 +17,7 @@ function makeLead(overrides: Partial<Lead>): Lead {
     pagesViewed: 1,
     isReturning: false,
     createdAt: '2026-07-09T10:00:00.000Z',
+    snoozedUntil: null,
     responseAction: null,
     responseTimeMs: null,
     ...overrides,

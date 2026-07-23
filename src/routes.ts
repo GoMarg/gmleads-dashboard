@@ -7,6 +7,7 @@ import {
   refreshRequestSchema,
   logoutRequestSchema,
   respondToAlertRequestSchema,
+  snoozeSessionRequestSchema,
   createRepRequestSchema,
   updateRepRequestSchema,
   accountCsvRowSchema,
@@ -108,6 +109,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       status?: string;
       minScore?: string;
       identificationSource?: string;
+      hideSnoozed?: string;
       limit?: string;
       offset?: string;
     };
@@ -115,11 +117,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const workspace = await workspaceRepo.findById(req.params.id);
     if (!workspace) return reply.code(404).send({ error: 'not_found' });
 
-    const { status, minScore, identificationSource, limit, offset } = req.query;
+    const { status, minScore, identificationSource, hideSnoozed, limit, offset } = req.query;
     const leads = await leadsRepo.listLeads(req.params.id, {
       status: status as SessionStatus | undefined,
       minScore: minScore ? Number(minScore) : undefined,
       identificationSource: identificationSource as IdentificationSourceFilter | undefined,
+      hideSnoozed: hideSnoozed === 'true',
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -162,6 +165,23 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         parsed.data.action
       );
       return reply.code(200).send(response);
+    }
+  );
+
+  // KAN-52 — snooze an alert for a fixed number of minutes. Deliberately
+  // separate from /respond: a snooze is not a terminal response (see
+  // migration 015's comment) and must not touch alert_responses.
+  app.patch<{ Params: { id: string; sid: string } }>(
+    '/internal/workspaces/:id/sessions/:sid/snooze',
+    async (req, reply) => {
+      const parsed = snoozeSessionRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'invalid_request', details: parsed.error.flatten() });
+      }
+
+      const snoozedUntil = await leadsRepo.snooze(req.params.id, req.params.sid, parsed.data.minutes);
+      if (!snoozedUntil) return reply.code(404).send({ error: 'not_found' });
+      return reply.code(200).send({ snoozedUntil });
     }
   );
 

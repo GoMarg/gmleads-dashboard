@@ -27,6 +27,7 @@ const baseSession: Lead = {
   pagesViewed: 2,
   isReturning: false,
   createdAt: '2026-07-09T10:00:00.000Z',
+  snoozedUntil: null,
   responseAction: null,
   responseTimeMs: null,
 };
@@ -130,5 +131,52 @@ describe('SessionReplay', () => {
     await user.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     expect(await screen.findByText('Could not record response.')).toBeInTheDocument();
+  });
+
+  // KAN-52
+  it('shows a Snooze button alongside Claim/Dismiss for an unresponded, unsnoozed session', () => {
+    renderSessionReplay(baseSession);
+    expect(screen.getByRole('button', { name: 'Snooze 1h' })).toBeInTheDocument();
+  });
+
+  it('shows "Snoozed until" instead of action buttons while snoozed', () => {
+    renderSessionReplay({ ...baseSession, snoozedUntil: '2099-01-01T00:00:00.000Z' });
+    expect(screen.getByText(/snoozed until/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Snooze 1h' })).not.toBeInTheDocument();
+  });
+
+  it('shows action buttons again once a past snoozedUntil has elapsed', () => {
+    renderSessionReplay({ ...baseSession, snoozedUntil: '2020-01-01T00:00:00.000Z' });
+    expect(screen.getByRole('button', { name: 'Claim' })).toBeInTheDocument();
+    expect(screen.queryByText(/snoozed until/i)).not.toBeInTheDocument();
+  });
+
+  it('clicking Snooze 1h calls the snooze endpoint with minutes: 60', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(200, { snoozedUntil: '2026-07-09T11:00:00.000Z' }))
+    );
+    renderSessionReplay(baseSession);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Snooze 1h' }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/workspaces/ws-1/sessions/session-1/snooze'),
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ minutes: 60 }) })
+      );
+    });
+  });
+
+  it('shows an error message if the snooze call fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(500, { error: 'internal' })));
+    renderSessionReplay(baseSession);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Snooze 1h' }));
+
+    expect(await screen.findByText('Could not snooze.')).toBeInTheDocument();
   });
 });

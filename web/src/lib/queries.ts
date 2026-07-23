@@ -6,6 +6,7 @@ import type {
   LeadFilters,
   ResponseStats,
   RespondResponse,
+  SnoozeResponse,
   FunnelStats,
   DeliveryStats,
   WidgetStatus,
@@ -35,6 +36,7 @@ function buildQueryString(filters: LeadFilters): string {
   if (filters.status) params.set('status', filters.status);
   if (filters.minScore !== undefined) params.set('minScore', String(filters.minScore));
   if (filters.identificationSource) params.set('identificationSource', filters.identificationSource);
+  if (filters.hideSnoozed) params.set('hideSnoozed', 'true');
   if (filters.limit !== undefined) params.set('limit', String(filters.limit));
   if (filters.offset !== undefined) params.set('offset', String(filters.offset));
   const qs = params.toString();
@@ -157,6 +159,23 @@ export function useRespondMutation(workspaceId: string | null) {
       authFetch<RespondResponse>(`/api/workspaces/${workspaceId}/sessions/${sessionId}/respond`, {
         method: 'POST',
         body: JSON.stringify({ action }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['leads', workspaceId] });
+      void queryClient.invalidateQueries({ queryKey: ['session-replay', workspaceId] });
+    },
+  });
+}
+
+// KAN-52 — same invalidation shape as useRespondMutation, since a snooze
+// changes what the leads list / session replay page should show too.
+export function useSnoozeMutation(workspaceId: string | null) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, minutes }: { sessionId: string; minutes: number }) =>
+      authFetch<SnoozeResponse>(`/api/workspaces/${workspaceId}/sessions/${sessionId}/snooze`, {
+        method: 'PATCH',
+        body: JSON.stringify({ minutes }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['leads', workspaceId] });
