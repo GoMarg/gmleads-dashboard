@@ -1,11 +1,11 @@
-FROM node:20-alpine AS shared-build
+FROM node:24-alpine AS shared-build
 WORKDIR /repo/gmleads-shared
 COPY gmleads-shared/package*.json ./
 RUN npm ci --ignore-scripts
 COPY gmleads-shared .
 RUN npm run build
 
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /repo/gmleads-dashboard
 COPY --from=shared-build /repo/gmleads-shared /repo/gmleads-shared
 COPY gmleads-dashboard/package*.json ./
@@ -13,7 +13,7 @@ RUN npm ci --ignore-scripts
 COPY gmleads-dashboard .
 RUN npm run build
 
-FROM node:20-alpine AS production
+FROM node:24-alpine AS production
 WORKDIR /repo/gmleads-dashboard
 ENV NODE_ENV=production
 COPY --from=shared-build --chown=node:node /repo/gmleads-shared /repo/gmleads-shared
