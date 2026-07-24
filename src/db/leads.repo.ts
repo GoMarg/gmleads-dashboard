@@ -27,6 +27,9 @@ interface SessionRow {
   delivered_at: Date | null;
   response_action: AlertResponseAction | null;
   responded_at: Date | null;
+  region_code: string | null;
+  consent_required: boolean;
+  consent_status: Session['consentStatus'];
 }
 
 interface TurnRow {
@@ -74,6 +77,9 @@ function toLead(row: SessionRow): Lead {
     enrichmentLookupPerformed: row.enrichment_lookup_performed,
     responseAction: row.response_action,
     responseTimeMs,
+    regionCode: row.region_code,
+    consentRequired: row.consent_required,
+    consentStatus: row.consent_status,
   };
 }
 
