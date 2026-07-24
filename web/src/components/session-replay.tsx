@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useRespondMutation, useSnoozeMutation } from '@/lib/queries';
 import { formatDuration } from '@/lib/format-duration';
 import type { ConversationTurnDto, Lead } from '@/lib/types';
+import { IdentificationSourceBadge } from './identification-source-badge';
 
 // KAN-52 — one preset (1 hour), matching the existing claim/dismiss
 // pattern's "minimal trigger" style rather than a full duration picker.
@@ -98,7 +99,10 @@ export function SessionReplay({ session, turns }: { session: Lead; turns: Conver
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold">{session.companyName ?? 'Unknown company'}</h1>
+        <h1 className="text-lg font-semibold">
+          {session.companyName ?? 'Unknown company'}
+          <IdentificationSourceBadge lead={session} />
+        </h1>
         <p className="text-sm text-black/60 dark:text-white/60">
           Status: <span className="capitalize">{session.status}</span> · Score: {session.icpScore}
         </p>

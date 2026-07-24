@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import type { Lead } from '@/lib/types';
 import { formatDuration } from '@/lib/format-duration';
+import { IdentificationSourceBadge } from './identification-source-badge';
 
 // KAN-59 AC3: alerts with no response must be visually distinguishable
 // from those handled quickly — never the same blank-looking cell.
@@ -44,6 +45,7 @@ export function LeadsTable({ leads }: { leads: Lead[] }): React.ReactElement {
               <Link href={`/leads/${lead.id}`} className="font-medium hover:underline">
                 {lead.companyName ?? 'Unknown company'}
               </Link>
+              <IdentificationSourceBadge lead={lead} />
             </td>
             <td className="py-2 pr-4 capitalize">
               {lead.status}
