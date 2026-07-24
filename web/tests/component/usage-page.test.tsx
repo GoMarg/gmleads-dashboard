@@ -77,6 +77,8 @@ describe('UsagePage', () => {
     expect(await screen.findByText(/120 of 1,000 used/)).toBeInTheDocument();
     expect(await screen.findByText('Enrichment lookups')).toBeInTheDocument();
     expect(await screen.findByText(/80 of 1,000 used/)).toBeInTheDocument();
+    // KAN-82 (AC3): well below 80% — no cap badge at all.
+    expect(screen.queryByTestId('gml-cap-badge')).toBeNull();
   });
 
   it('flags an over-quota workspace', async () => {
@@ -104,5 +106,70 @@ describe('UsagePage', () => {
     renderPage();
 
     expect(await screen.findByText(/over quota/)).toBeInTheDocument();
+    // KAN-82 (AC3): sessions (120%) is at cap; enrichment (50%) is not —
+    // exactly one badge, not two.
+    expect(await screen.findByText('At limit')).toBeInTheDocument();
+    expect(screen.queryByText('Approaching limit')).toBeNull();
+  });
+
+  // KAN-82 (AC3): tenant admins can see when an account *approached* a cap,
+  // not just after it's fully hit — the 80% boundary, exactly at the edge.
+  it('shows "Approaching limit" at exactly 80% usage, without an over-quota label', async () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    const fetchSpy = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse(200, {
+          periodStart: '2026-07-01T00:00:00.000Z',
+          periodEnd: '2026-08-01T00:00:00.000Z',
+          sessionsUsed: 800,
+          sessionsQuota: 1000,
+          enrichmentLookupsUsed: 100,
+          enrichmentLookupsQuota: 1000,
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    expect(await screen.findByText('Approaching limit')).toBeInTheDocument();
+    expect(screen.queryByText('At limit')).toBeNull();
+    expect(screen.queryByText(/over quota/)).toBeNull();
+  });
+
+  // KAN-82 (AC3): exactly at 100% — the other boundary edge — must already
+  // read as "at cap," not "approaching."
+  it('shows "At limit" at exactly 100% usage (boundary, not just over)', async () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+    const fetchSpy = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse(200, {
+          periodStart: '2026-07-01T00:00:00.000Z',
+          periodEnd: '2026-08-01T00:00:00.000Z',
+          sessionsUsed: 1000,
+          sessionsQuota: 1000,
+          enrichmentLookupsUsed: 0,
+          enrichmentLookupsQuota: 1000,
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+
+    renderPage();
+
+    expect(await screen.findByText('At limit')).toBeInTheDocument();
+    expect(screen.queryByText('Approaching limit')).toBeNull();
   });
 });
