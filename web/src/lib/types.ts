@@ -163,13 +163,16 @@ export interface WidgetStatus {
   lastSeenAt: string | null;
 }
 
-// KAN-60 — session usage vs quota for the current calendar month only (see
-// gmleads-dashboard's usage.repo.ts for scope notes).
+// KAN-60 — session + enrichment-lookup usage vs quota for the current
+// calendar month (see gmleads-dashboard's usage.repo.ts for scope notes —
+// no AI-message dimension, by deliberate product-direction decision).
 export interface UsageSummary {
   periodStart: string;
   periodEnd: string;
   sessionsUsed: number;
   sessionsQuota: number;
+  enrichmentLookupsUsed: number;
+  enrichmentLookupsQuota: number;
 }
 
 // KAN-74/75/76/77 — Predictive Analytics (Wave 3). See ADR-016.

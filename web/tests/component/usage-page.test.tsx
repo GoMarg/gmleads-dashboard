@@ -61,6 +61,8 @@ describe('UsagePage', () => {
           periodEnd: '2026-08-01T00:00:00.000Z',
           sessionsUsed: 120,
           sessionsQuota: 1000,
+          enrichmentLookupsUsed: 80,
+          enrichmentLookupsQuota: 1000,
         })
       )
     );
@@ -71,7 +73,10 @@ describe('UsagePage', () => {
     await waitFor(() => {
       expect(fetchSpy.mock.calls[0]?.[0]).toContain('/api/workspaces/workspace-a/usage');
     });
-    expect(await screen.findByText(/120 of 1,000 sessions used/)).toBeInTheDocument();
+    expect(await screen.findByText('Sessions')).toBeInTheDocument();
+    expect(await screen.findByText(/120 of 1,000 used/)).toBeInTheDocument();
+    expect(await screen.findByText('Enrichment lookups')).toBeInTheDocument();
+    expect(await screen.findByText(/80 of 1,000 used/)).toBeInTheDocument();
   });
 
   it('flags an over-quota workspace', async () => {
@@ -89,6 +94,8 @@ describe('UsagePage', () => {
           periodEnd: '2026-08-01T00:00:00.000Z',
           sessionsUsed: 1200,
           sessionsQuota: 1000,
+          enrichmentLookupsUsed: 500,
+          enrichmentLookupsQuota: 1000,
         })
       )
     );

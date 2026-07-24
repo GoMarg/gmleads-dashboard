@@ -23,6 +23,7 @@ interface SessionRow {
   is_returning: boolean;
   created_at: Date;
   snoozed_until: Date | null;
+  enrichment_lookup_performed: boolean;
   delivered_at: Date | null;
   response_action: AlertResponseAction | null;
   responded_at: Date | null;
@@ -70,6 +71,7 @@ function toLead(row: SessionRow): Lead {
     isReturning: row.is_returning,
     createdAt: row.created_at,
     snoozedUntil: row.snoozed_until,
+    enrichmentLookupPerformed: row.enrichment_lookup_performed,
     responseAction: row.response_action,
     responseTimeMs,
   };

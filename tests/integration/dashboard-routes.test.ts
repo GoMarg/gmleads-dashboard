@@ -15,6 +15,7 @@ async function createTestSession(
     alertedAt?: Date;
     firmographics?: Record<string, unknown> | null;
     createdAt?: Date;
+    enrichmentLookupPerformed?: boolean;
   } = {}
 ): Promise<string> {
   // Mirrors gmleads-session's real invariant (session.repo.ts's setStatus):
@@ -37,8 +38,8 @@ async function createTestSession(
   // KAN-60: created_at defaults to now() when omitted — explicit only for
   // tests that need a session outside the current usage period.
   const res = await db.query<{ id: string }>(
-    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at, firmographics, created_at)
-     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4, $5, COALESCE($6, now()))
+    `INSERT INTO sessions (workspace_id, visitor_ip_hash, page_url, status, icp_score, alerted_at, firmographics, created_at, enrichment_lookup_performed)
+     VALUES ($1, 'test-hash', 'https://example.com/', $2, $3, $4, $5, COALESCE($6, now()), $7)
      RETURNING id`,
     [
       workspaceId,
@@ -47,6 +48,7 @@ async function createTestSession(
       alertedAt,
       overrides.firmographics !== undefined ? overrides.firmographics : null,
       overrides.createdAt ?? null,
+      overrides.enrichmentLookupPerformed ?? false,
     ]
   );
   return res.rows[0]!.id;
@@ -962,6 +964,39 @@ describe('GET /internal/workspaces/:id/usage (KAN-60)', () => {
       url: '/internal/workspaces/00000000-0000-0000-0000-000000000000/usage',
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('counts only sessions with a real (non-cached) enrichment lookup', async () => {
+    const ws = await createTestWorkspace(db);
+    await createTestSession(ws.id, { enrichmentLookupPerformed: true });
+    await createTestSession(ws.id, { enrichmentLookupPerformed: true });
+    await createTestSession(ws.id, { enrichmentLookupPerformed: false });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/usage`,
+    });
+    const body = res.json();
+    expect(body.sessionsUsed).toBe(3);
+    expect(body.enrichmentLookupsUsed).toBe(2);
+    expect(body.enrichmentLookupsQuota).toBe(1000); // migration 016's DEFAULT
+  });
+
+  it('reflects a workspace-specific enrichment quota override', async () => {
+    const ws = await createTestWorkspace(db);
+    await db.query('UPDATE workspaces SET monthly_enrichment_quota = $2 WHERE id = $1', [
+      ws.id,
+      5,
+    ]);
+    await createTestSession(ws.id, { enrichmentLookupPerformed: true });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/internal/workspaces/${ws.id}/usage`,
+    });
+    expect(res.json()).toEqual(
+      expect.objectContaining({ enrichmentLookupsUsed: 1, enrichmentLookupsQuota: 5 })
+    );
   });
 });
 

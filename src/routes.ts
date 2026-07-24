@@ -268,10 +268,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       const workspace = await workspaceRepo.findById(req.params.id);
       if (!workspace) return reply.code(404).send({ error: 'not_found' });
 
-      const usage = await usageRepo.getCurrentPeriodUsage(
-        workspace.id,
-        workspace.monthlySessionQuota ?? 1000
-      );
+      const usage = await usageRepo.getCurrentPeriodUsage(workspace.id, {
+        sessionsQuota: workspace.monthlySessionQuota ?? 1000,
+        enrichmentLookupsQuota: workspace.monthlyEnrichmentQuota ?? 1000,
+      });
       return reply.send(usage);
     }
   );
