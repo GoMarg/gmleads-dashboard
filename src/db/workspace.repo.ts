@@ -24,6 +24,7 @@ interface WorkspaceRow {
   business_hours: BusinessHours | null;
   timezone: string | null;
   monthly_session_quota: number;
+  monthly_enrichment_quota: number;
 }
 
 function toWorkspace(row: WorkspaceRow): Workspace {
@@ -42,6 +43,7 @@ function toWorkspace(row: WorkspaceRow): Workspace {
     businessHours: row.business_hours,
     timezone: row.timezone,
     monthlySessionQuota: row.monthly_session_quota,
+    monthlyEnrichmentQuota: row.monthly_enrichment_quota,
   };
 }
 
