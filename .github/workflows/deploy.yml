@@ -98,6 +98,27 @@ jobs:
       - name: Sanity-check Railway auth
         run: railway status --json >/dev/null
 
+      - name: Check out gmleads-infra (migrations + check-migrations.sh)
+        uses: actions/checkout@v4
+        with:
+          repository: GoMarg/gmleads-infra
+          path: gmleads-infra-src
+          ref: develop
+          token: ${{ secrets.SHARED_REPO_PAT }}
+
+      - name: Guard — refuse to deploy if the target database has pending migrations
+        # 2026-07-25 incident: migrations 014-018 sat unapplied in
+        # production for days with nothing failing loudly, because
+        # nothing in the deploy path ever checked. This is that check —
+        # see gmleads-infra/scripts/check-migrations.sh for how it works.
+        run: |
+          DATABASE_URL=$(railway variables --service Postgres --environment "${{ inputs.environment }}" --kv | grep '^DATABASE_PUBLIC_URL=' | cut -d'=' -f2-)
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Could not resolve Postgres's DATABASE_PUBLIC_URL for '${{ inputs.environment }}' — cannot verify migration status, refusing to deploy."
+            exit 1
+          fi
+          DATABASE_URL="$DATABASE_URL" bash gmleads-infra-src/scripts/check-migrations.sh
+
       - name: Record the currently running image (for rollback reference)
         id: before
         run: |
