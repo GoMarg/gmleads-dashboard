@@ -49,4 +49,54 @@ describe('LeadsTable', () => {
     expect(screen.getByText(/2m 5s/)).toBeInTheDocument();
     expect(screen.getByText(/claimed/)).toBeInTheDocument();
   });
+
+  // Audit finding (2026-07-25): an ipapi-sourced result is an ISP/network
+  // guess, not a confirmed company — previously indistinguishable from a
+  // real match in this table.
+  it('flags an ipapi-sourced company name as unverified', () => {
+    render(
+      <LeadsTable
+        leads={[
+          makeLead({
+            companyName: 'Comcast Cable Communications LLC',
+            firmographics: {
+              company: 'Comcast Cable Communications LLC',
+              domain: null,
+              industry: null,
+              employeeRange: null,
+              confidence: 0.2,
+              source: 'ipapi',
+            },
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByText('unverified')).toBeInTheDocument();
+  });
+
+  it('does not flag a genuine leadfeeder-sourced company name', () => {
+    render(
+      <LeadsTable
+        leads={[
+          makeLead({
+            companyName: 'Acme Corp',
+            firmographics: {
+              company: 'Acme Corp',
+              domain: 'acme.com',
+              industry: null,
+              employeeRange: null,
+              confidence: 0.95,
+              source: 'leadfeeder',
+            },
+          }),
+        ]}
+      />
+    );
+    expect(screen.queryByText('unverified')).not.toBeInTheDocument();
+  });
+
+  it('does not show the badge for an unidentified visitor', () => {
+    render(<LeadsTable leads={[makeLead({ companyName: null, firmographics: null })]} />);
+    expect(screen.queryByText('unverified')).not.toBeInTheDocument();
+  });
 });
