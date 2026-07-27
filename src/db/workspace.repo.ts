@@ -90,9 +90,18 @@ export class WorkspaceRepo {
 
   // KAN-74/76: the nightly scoring job and the hourly digest-schedule check
   // both need to iterate every workspace, not one at a time by id.
-  async findAll(): Promise<Workspace[]> {
-    const res = await this.db.query<WorkspaceRow>('SELECT * FROM workspaces');
-    return res.rows.map(toWorkspace);
+  // Uses keyset pagination to avoid loading all workspaces into memory at once.
+  async *iterateAll(batchSize = 100): AsyncGenerator<Workspace[], void, unknown> {
+    let lastId = '';
+    while (true) {
+      const res = await this.db.query<WorkspaceRow>(
+        'SELECT * FROM workspaces WHERE id > $1 ORDER BY id ASC LIMIT $2',
+        [lastId, batchSize]
+      );
+      if (res.rows.length === 0) break;
+      yield res.rows.map(toWorkspace);
+      lastId = res.rows[res.rows.length - 1]!.id;
+    }
   }
 
   async updateDarkFunnelSettings(

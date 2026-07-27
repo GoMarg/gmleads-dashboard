@@ -53,10 +53,11 @@ async function start(): Promise<void> {
       name: 'nightly-account-scoring',
       cronExpression: '0 2 * * *', // 02:00 UTC daily
       run: async () => {
-        const workspaces = await workspaceRepo.findAll();
-        for (const workspace of workspaces) {
-          await accountScoringService.recomputeWorkspace(workspace.id);
-          await darkFunnelService.recomputeWorkspace(workspace.id);
+        for await (const batch of workspaceRepo.iterateAll()) {
+          for (const workspace of batch) {
+            await accountScoringService.recomputeWorkspace(workspace.id);
+            await darkFunnelService.recomputeWorkspace(workspace.id);
+          }
         }
       },
     });
@@ -64,10 +65,11 @@ async function start(): Promise<void> {
       name: 'hourly-digest-schedule-check',
       cronExpression: '0 * * * *', // every hour, on the hour, UTC
       run: async () => {
-        const workspaces = await workspaceRepo.findAll();
         const now = new Date();
-        for (const workspace of workspaces) {
-          await digestService.sendIfDue(workspace.id, now);
+        for await (const batch of workspaceRepo.iterateAll()) {
+          for (const workspace of batch) {
+            await digestService.sendIfDue(workspace.id, now);
+          }
         }
       },
     });

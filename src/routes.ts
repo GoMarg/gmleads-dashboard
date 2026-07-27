@@ -90,16 +90,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     // transaction as the workspace row (see ADR-013) — a workspace can
     // never exist with zero logins able to reach its dashboard.
     const passwordHash = await hashPassword(adminPassword);
-    const workspace = await db.transaction(async (tx) => {
-      const ws = await new WorkspaceRepo(tx).create({
-        name,
-        slackWebhookUrl: slackWebhookUrl ?? null,
-        slackChannelUrl: slackChannelUrl ?? null,
-        icpDefinition: icpDefinition ?? {},
+    let workspace;
+    try {
+      workspace = await db.transaction(async (tx) => {
+        const ws = await new WorkspaceRepo(tx).create({
+          name,
+          slackWebhookUrl: slackWebhookUrl ?? null,
+          slackChannelUrl: slackChannelUrl ?? null,
+          icpDefinition: icpDefinition ?? {},
+        });
+        await new UsersRepo(tx).create(ws.id, adminEmail, passwordHash);
+        return ws;
       });
-      await new UsersRepo(tx).create(ws.id, adminEmail, passwordHash);
-      return ws;
-    });
+    } catch (err) {
+      const error = err as Error;
+      if (error.message === 'user_already_exists') {
+        return reply.code(409).send({ error: 'user_already_exists', details: 'A user with this email already exists.' });
+      }
+      throw err;
+    }
     return reply.code(201).send(workspace);
   });
 

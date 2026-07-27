@@ -21,11 +21,19 @@ export class UsersRepo {
   constructor(private db: IDatabase) {}
 
   async create(workspaceId: string, email: string, passwordHash: string): Promise<User> {
-    const res = await this.db.query<UserRow>(
-      `INSERT INTO users (workspace_id, email, password_hash) VALUES ($1, $2, $3) RETURNING *`,
-      [workspaceId, email, passwordHash]
-    );
-    return toUser(res.rows[0]!);
+    try {
+      const res = await this.db.query<UserRow>(
+        `INSERT INTO users (workspace_id, email, password_hash) VALUES ($1, $2, $3) RETURNING *`,
+        [workspaceId, email, passwordHash]
+      );
+      return toUser(res.rows[0]!);
+    } catch (err) {
+      const error = err as { code?: string };
+      if (error.code === '23505') {
+        throw new Error('user_already_exists');
+      }
+      throw err;
+    }
   }
 
   // Includes passwordHash — internal to this repo layer only (see User's
