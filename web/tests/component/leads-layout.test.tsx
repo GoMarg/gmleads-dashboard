@@ -104,6 +104,21 @@ describe('LeadsLayout (auth guard)', () => {
     expect(screen.getByRole('link', { name: 'Funnel' })).toHaveAttribute('href', '/leads/funnel');
   });
 
+  // Self-serve embed-key page
+  it('links to /leads/install in the nav', () => {
+    mockUseAuth.mockReturnValue({
+      accessToken: 'a-valid-token',
+      workspaceId: 'workspace-a',
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+    });
+
+    renderLayout(<div>protected content</div>);
+
+    expect(screen.getByRole('link', { name: 'Install' })).toHaveAttribute('href', '/leads/install');
+  });
+
   // KAN-66/67/68/69
   it('links to /leads/routing in the nav', () => {
     mockUseAuth.mockReturnValue({

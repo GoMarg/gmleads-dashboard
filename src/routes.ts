@@ -112,6 +112,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send(workspace);
   });
 
+  // Dashboard "Install" page (self-serve embed key) — a logged-in customer
+  // previously had no way to see their own embed_key/snippet after the
+  // one-time POST /internal/workspaces creation response; only the JWT
+  // itself (which carries workspaceId, not the key) survived past signup.
+  app.get<{ Params: { id: string } }>('/internal/workspaces/:id', async (req, reply) => {
+    const workspace = await workspaceRepo.findById(req.params.id);
+    if (!workspace) return reply.code(404).send({ error: 'not_found' });
+    return reply.send({ id: workspace.id, name: workspace.name, embedKey: workspace.embedKey });
+  });
+
   app.get<{
     Params: { id: string };
     Querystring: {
