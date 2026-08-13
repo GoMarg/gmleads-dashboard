@@ -856,6 +856,23 @@ describe('GET /internal/workspaces/:id/alerts/delivery-stats', () => {
   });
 });
 
+describe('GET /internal/workspaces/:id (dashboard Install page)', () => {
+  it('returns id, name, and embedKey for an existing workspace', async () => {
+    const ws = await createTestWorkspace(db, { name: 'Gridflow' });
+    const res = await app.inject({ method: 'GET', url: `/internal/workspaces/${ws.id}` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ id: ws.id, name: 'Gridflow', embedKey: ws.embedKey });
+  });
+
+  it('404s for a workspace that does not exist', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/internal/workspaces/00000000-0000-0000-0000-000000000000',
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe('GET /internal/workspaces/:id/widget-status', () => {
   it('returns null lastSeenAt for a workspace with no sessions ever', async () => {
     const ws = await createTestWorkspace(db);

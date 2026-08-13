@@ -29,6 +29,7 @@ import type {
   SlackChannelDto,
   RepPresenceDto,
   BusinessHoursConfig,
+  WorkspaceProfile,
 } from './types';
 
 function buildQueryString(filters: LeadFilters): string {
@@ -123,6 +124,16 @@ export function useIdentificationAccuracyQuery(
         `/api/workspaces/${workspaceId}/analytics/identification-accuracy${qs}`
       );
     },
+    enabled: Boolean(workspaceId),
+  });
+}
+
+// Dashboard "Install" page — name + embed key for the copy-paste snippet.
+// Single fetch per mount, same convention as useWidgetStatusQuery below.
+export function useWorkspaceProfileQuery(workspaceId: string | null) {
+  return useQuery({
+    queryKey: ['workspace-profile', workspaceId],
+    queryFn: () => authFetch<WorkspaceProfile>(`/api/workspaces/${workspaceId}`),
     enabled: Boolean(workspaceId),
   });
 }

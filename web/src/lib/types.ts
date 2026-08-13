@@ -163,6 +163,13 @@ export interface WidgetStatus {
   lastSeenAt: string | null;
 }
 
+// Dashboard "Install" page — name + embed key, for the copy-paste snippet.
+export interface WorkspaceProfile {
+  id: string;
+  name: string;
+  embedKey: string;
+}
+
 // KAN-60 — session + enrichment-lookup usage vs quota for the current
 // calendar month (see gmleads-dashboard's usage.repo.ts for scope notes —
 // no AI-message dimension, by deliberate product-direction decision).

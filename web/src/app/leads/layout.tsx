@@ -16,9 +16,10 @@ import { WidgetStatusIndicator } from '@/components/widget-status-indicator';
 // nested /leads/crm route, KAN-48 (Slack OAuth) attaches a nested
 // /leads/slack route, KAN-74/75/76/77 (Predictive Analytics)
 // attach /leads/accounts, /leads/dark-funnel, /leads/rep-performance, and
-// /leads/digest, KAN-55 (AC3) attaches /leads/business-hours, and KAN-60
-// (usage/quota) attaches /leads/usage — all without reworking this layout —
-// see PROJECT_STATUS_JULY_2026.md's wave sequencing.
+// /leads/digest, KAN-55 (AC3) attaches /leads/business-hours, KAN-60
+// (usage/quota) attaches /leads/usage, and the self-serve embed-key page
+// attaches /leads/install — all without reworking this layout — see
+// PROJECT_STATUS_JULY_2026.md's wave sequencing.
 export default function LeadsLayout({ children }: { children: React.ReactNode }): React.ReactElement | null {
   const { accessToken, workspaceId, isInitializing, logout } = useAuth();
   const router = useRouter();
@@ -52,6 +53,7 @@ export default function LeadsLayout({ children }: { children: React.ReactNode })
             flex-shrink-0 keeps each link's text from being squeezed. */}
         <nav className="flex items-center gap-4 overflow-x-auto text-sm font-medium">
           <Link className="shrink-0" href="/leads">Leads</Link>
+          <Link className="shrink-0" href="/leads/install">Install</Link>
           <Link className="shrink-0" href="/leads/funnel">Funnel</Link>
           <Link className="shrink-0" href="/leads/routing">Routing</Link>
           <Link className="shrink-0" href="/leads/crm">CRM</Link>
